@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "codoc-in-md"
+version = "0.1.0"
+description = ""
+authors = []
+packages = [{include = "codoc_in_md"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+reflex = "0.8.23"
+reflex-monaco = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
