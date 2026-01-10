@@ -6,8 +6,8 @@ authors = []
 packages = [{include = "codoc_in_md"}]
 
 [tool.poetry.dependencies]
-python = "^3.10"
-reflex = "0.8.23"
+python = "~3.11"
+reflex = "0.8.24"
 reflex-monaco = "*"
 
 [build-system]

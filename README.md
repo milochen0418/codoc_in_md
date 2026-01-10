@@ -15,7 +15,7 @@ CoDoc in MD 是一個使用 [Reflex](https://reflex.dev/) 構建的即時協作 
 
 ## 安裝與執行
 
-本專案使用 [Poetry](https://python-poetry.org/) 進行依賴管理。請確保您的系統已安裝 Python 3.10+ 和 Poetry。
+本專案使用 [Poetry](https://python-poetry.org/) 進行依賴管理。請確保您的系統已安裝 Python 3.11 和 Poetry。
 
 ### 1. 克隆專案
 
@@ -24,7 +24,24 @@ git clone <repository-url>
 cd codoc_in_md
 ```
 
-### 2. 安裝依賴
+### 2. （建議）設定 Poetry 使用 Python 3.11
+
+Poetry 有時會自動選到系統中其他版本的 Python（例如 3.12/3.14），導致本專案的 Python 版本限制（僅允許 3.11.*）無法滿足。
+
+建議先明確指定 Poetry 使用 `python3.11`：
+
+```bash
+poetry env use python3.11
+poetry env info
+```
+
+如果你的系統沒有 `python3.11` 這個指令，請改成指定 Python 3.11 的可執行檔路徑，例如：
+
+```bash
+poetry env use /absolute/path/to/python3.11
+```
+
+### 3. 安裝依賴
 
 使用 Poetry 安裝專案所需的套件：
 
@@ -32,7 +49,7 @@ cd codoc_in_md
 poetry install
 ```
 
-### 3. 執行應用程式
+### 4. 執行應用程式
 
 啟動 Reflex 開發伺服器：
 
@@ -63,4 +80,4 @@ poetry run reflex run
 
 -   **Reflex**: 全端 Python Web 框架。
 -   **Reflex Monaco**: 整合 Monaco Editor 到 Reflex。
--   **Python 3.10+**: 核心語言。
+-   **Python 3.11**: 核心語言。
