@@ -4,8 +4,7 @@ from codoc_in_md.state import EditorState
 from codoc_in_md.components.header import header
 from codoc_in_md.components.sidebar import sidebar
 
-from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from codoc_in_md.embeds import register_backend_embed_routes
 
 
 def editor_panel() -> rx.Component:
@@ -127,116 +126,8 @@ app = rx.App(
         ),
     ],
 )
-
-
-def embed_sequence() -> rx.Component:
-    """Client-side sequence diagram renderer (for iframe embedding)."""
-
-    return rx.el.div(
-        rx.el.div(id="diagram", class_name="w-full"),
-        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/webfont.js"),
-        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/snap.svg-min.js"),
-        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/underscore-min.js"),
-        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js"),
-        rx.el.script(
-            """
-            (function(){
-              try {
-                var params = new URLSearchParams(window.location.search);
-                var code = params.get('code') || '';
-                code = decodeURIComponent(code);
-                if (!code) return;
-                var d = Diagram.parse(code);
-                d.drawSVG('diagram', { theme: 'simple' });
-              } catch (e) {
-                var pre = document.createElement('pre');
-                pre.textContent = (new URLSearchParams(window.location.search)).get('code') || '';
-                document.body.appendChild(pre);
-              }
-            })();
-            """,
-        ),
-        style={"padding": "12px", "fontFamily": "sans-serif"},
-    )
-
-
-def embed_gist() -> rx.Component:
-    """Client-side gist renderer (for iframe embedding)."""
-
-    return rx.el.div(
-        rx.el.script(
-            """
-            (function(){
-              var params = new URLSearchParams(window.location.search);
-              var url = params.get('url') || '';
-              try { url = decodeURIComponent(url); } catch (e) {}
-              if (!url) return;
-              var s = document.createElement('script');
-              s.src = url;
-              document.body.appendChild(s);
-            })();
-            """,
-        ),
-        style={"margin": "0", "padding": "0"},
-    )
-
 app.add_page(index, route="/doc/[document_id]", on_load=EditorState.on_load)
 app.add_page(index, route="/", on_load=EditorState.on_load)
-app.add_page(embed_sequence, route="/__embed/sequence")
-app.add_page(embed_gist, route="/__embed/gist")
 
-
-def _embed_html(body: str) -> str:
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'/>"
-        "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-        "<style>body{margin:0;padding:0;font-family:sans-serif}</style>"
-        "</head><body>"
-        f"{body}"
-        "</body></html>"
-    )
-
-
-def _api_embed_gist(request: Request) -> HTMLResponse:
-    url = (request.query_params.get("url") or "").strip()
-    if not url or not url.lower().startswith("https://"):
-        return HTMLResponse(_embed_html("<pre>Invalid gist URL</pre>"))
-
-    # The gist embed script uses document.write, so it must run during HTML parsing.
-    safe = (
-        url.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\"", "&quot;")
-        .replace("'", "&#x27;")
-    )
-    body = (
-        "<style>body{margin:0;padding:0} .gist{font-size:12px}</style>"
-        f"<script src='{safe}'></script>"
-    )
-    return HTMLResponse(_embed_html(body))
-
-
-def _api_embed_sequence(request: Request) -> HTMLResponse:
-    code = (request.query_params.get("code") or "").strip()
-    if not code:
-        return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
-
-    safe_code = code.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    body = (
-        "<div id='diagram'></div>"
-        f"<pre id='source' style='display:none'>{safe_code}</pre>"
-        "<script src='https://bramp.github.io/js-sequence-diagrams/js/webfont.js'></script>"
-        "<script src='https://bramp.github.io/js-sequence-diagrams/js/snap.svg-min.js'></script>"
-        "<script src='https://bramp.github.io/js-sequence-diagrams/js/underscore-min.js'></script>"
-        "<script src='https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js'></script>"
-        "<script>(function(){try{var text=document.getElementById('source').textContent;"
-        "var d=Diagram.parse(text);d.drawSVG('diagram',{theme:'simple'});}catch(e){"
-        "var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
-    )
-    return HTMLResponse(_embed_html(body))
-
-
-# Backend static embed endpoints (port 8000).
-app._api.add_route("/__embed/gist", _api_embed_gist, methods=["GET"])
-app._api.add_route("/__embed/sequence", _api_embed_sequence, methods=["GET"])
+# Backend embed endpoints (used by fenced-block renderers like ```sequence```).
+register_backend_embed_routes(app)

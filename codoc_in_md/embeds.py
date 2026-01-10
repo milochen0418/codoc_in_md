@@ -11,12 +11,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import html
+import os
 import re
 from typing import Protocol
 import json
 import time
-from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from urllib.request import Request, urlopen
+
+import reflex as rx
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import HTMLResponse
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +117,15 @@ _OEMBED_CACHE: dict[str, tuple[float, str]] = {}
 _OEMBED_TTL_S = 60 * 60 * 24
 
 
+def _backend_base_url() -> str:
+    """Base URL for the Reflex backend (used by embed iframes).
+
+    Default matches Reflex dev backend port. Override via env for other deployments.
+    """
+
+    return os.getenv("CODOC_BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
 def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
     """Fetch oEmbed HTML with a tiny in-memory cache."""
 
@@ -139,6 +153,125 @@ def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
         _OEMBED_CACHE[cache_key] = (now, html_snippet)
         return html_snippet
     return None
+
+
+_GIST_CACHE: dict[str, tuple[float, str]] = {}
+
+
+def _build_gist_js_url(value: str) -> str | None:
+    v = (value or "").strip()
+    if not v:
+        return None
+
+    # HackMD shorthand: user/gist_id
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9]+", v):
+        return f"https://gist.github.com/{v}.js"
+
+    # Full gist URL.
+    if v.lower().startswith("https://"):
+        try:
+            parsed = urlparse(v)
+        except Exception:
+            return None
+        host = (parsed.netloc or "").lower()
+        if "gist.github.com" not in host:
+            return None
+
+        # Ensure the `.js` suffix is applied to the *path* (not appended after query
+        # params like `?file=...`). Preserve any existing query string.
+        path = (parsed.path or "").rstrip("/")
+        if not path:
+            return None
+        if not path.endswith(".js"):
+            path = path + ".js"
+        return urlunparse(
+            (
+                parsed.scheme,
+                parsed.netloc,
+                path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment,
+            )
+        )
+
+    return None
+
+
+def _extract_gist_id(value: str) -> str | None:
+    v = (value or "").strip()
+    if not v:
+        return None
+
+    # HackMD shorthand: user/gist_id
+    if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9]+", v):
+        return v.split("/", 1)[1]
+
+    # Full gist URL.
+    if v.lower().startswith("https://"):
+        try:
+            parsed = urlparse(v)
+        except Exception:
+            return None
+        host = (parsed.netloc or "").lower()
+        if "gist.github.com" not in host:
+            return None
+        parts = [p for p in (parsed.path or "").split("/") if p]
+        if not parts:
+            return None
+        candidate = parts[-1]
+        if candidate.endswith(".js"):
+            candidate = candidate[: -len(".js")]
+        return candidate or None
+
+    return None
+
+
+def _fetch_gist_html(gist_id: str) -> str | None:
+    now = time.time()
+    cached = _GIST_CACHE.get(gist_id)
+    if cached and now - cached[0] < _OEMBED_TTL_S:
+        return cached[1]
+
+    api_url = f"https://api.github.com/gists/{gist_id}"
+    try:
+        req = Request(
+            api_url,
+            headers={
+                "User-Agent": "codoc-in-md",
+                "Accept": "application/vnd.github+json",
+            },
+        )
+        with urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+    files = (data or {}).get("files") if isinstance(data, dict) else None
+    if not isinstance(files, dict) or not files:
+        return None
+
+    parts: list[str] = ["<div class=\"my-4 w-full\">"]
+    for filename, meta in files.items():
+        if not isinstance(meta, dict):
+            continue
+        content = meta.get("content")
+        if not isinstance(content, str):
+            continue
+        safe_name = html.escape(str(filename), quote=True)
+        safe_content = html.escape(content)
+        parts.append(
+            f"<div class=\"mb-3\"><div class=\"text-sm font-semibold text-gray-700 mb-1\">{safe_name}</div>"
+        )
+        parts.append(
+            "<pre class=\"overflow-auto text-sm bg-gray-50 border border-gray-200 rounded p-3\">"
+            f"{safe_content}</pre></div>"
+        )
+    parts.append("</div>")
+
+    rendered = "".join(parts)
+    _GIST_CACHE[gist_id] = (now, rendered)
+    return rendered
 
 
 class YouTubeEmbed:
@@ -254,27 +387,102 @@ class GistEmbed:
         if not value:
             return None
 
-        # HackMD allows shorthand like `user/gist_id`.
-        if not value.lower().startswith("https://"):
-            if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9]+", value):
-                value = f"https://gist.github.com/{value}"
-            else:
-                return None
+        # Prefer the official gist embed script via backend static HTML.
+        # This matches HackMD/GitHub behavior and avoids markdown parsing issues
+        # (e.g. lines starting with `#` becoming headings).
+        gist_js = _build_gist_js_url(value)
+        if gist_js:
+            base = _backend_base_url()
+            query = urlencode({"url": gist_js})
+            iframe_src = f"{base}/__embed/gist?{query}"
+            return (
+                "\n<div class=\"my-4 w-full\">"
+                "<iframe sandbox=\"allow-scripts allow-same-origin\" "
+                "style=\"width:100%;height:600px;border:0;\" "
+                f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+                "</div>\n"
+            )
 
-        gist_js = value
-        if "gist.github.com" in value and not value.rstrip("/").endswith(".js"):
-            gist_js = value.rstrip("/") + ".js"
+        # Fallback: server-side rendering via GitHub API (no iframe).
+        gist_id = _extract_gist_id(value)
+        if gist_id:
+            rendered = _fetch_gist_html(gist_id)
+            if rendered:
+                return "\n" + rendered + "\n"
 
-        # Use the backend port for static HTML so the gist embed script executes
-        # during HTML parsing (it uses document.write).
-        iframe_src = f"http://localhost:8000/__embed/gist?url={quote_plus(gist_js)}"
+        # Last resort: link only.
+        safe_value = html.escape(value, quote=True)
         return (
-            "\n<div class=\"my-4 w-full\">"
-            "<iframe sandbox=\"allow-scripts allow-same-origin\" "
-            "style=\"width:100%;height:420px;border:0;\" "
-            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
-            "</div>\n"
+            "\n<div class=\"my-4\">"
+            f"<a href=\"{safe_value}\" target=\"_blank\" rel=\"noreferrer\">"
+            f"Gist {html.escape(value)}"
+            "</a></div>\n"
         )
+
+
+def register_backend_embed_routes(app: rx.App) -> None:
+    """Register backend (port 8000) embed endpoints.
+
+    These return static HTML so third-party scripts like GitHub Gist (document.write)
+    execute reliably when loaded in an iframe.
+    """
+
+    def _embed_html(body: str) -> str:
+        return (
+            "<!doctype html><html><head><meta charset='utf-8'/>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
+            "<style>body{margin:0;padding:0;font-family:sans-serif}</style>"
+            "</head><body>"
+            f"{body}"
+            "</body></html>"
+        )
+
+    def _api_embed_gist(request: StarletteRequest) -> HTMLResponse:
+        url = (request.query_params.get("url") or "").strip()
+        if not url or not url.lower().startswith("https://"):
+            return HTMLResponse(_embed_html("<pre>Invalid gist URL</pre>"))
+
+        safe = (
+            url.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#x27;")
+        )
+        body = (
+            "<style>body{margin:0;padding:0} .gist{font-size:12px}</style>"
+            f"<script src='{safe}'></script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    def _api_embed_sequence(request: StarletteRequest) -> HTMLResponse:
+        code = (request.query_params.get("code") or "").strip()
+        if not code:
+            return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
+
+        safe_code = (
+            code.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        body = (
+            "<div id='diagram'></div>"
+            f"<pre id='source' style='display:none'>{safe_code}</pre>"
+            "<script src='https://bramp.github.io/js-sequence-diagrams/js/webfont.js'></script>"
+            "<script src='https://bramp.github.io/js-sequence-diagrams/js/snap.svg-min.js'></script>"
+            "<script src='https://bramp.github.io/js-sequence-diagrams/js/underscore-min.js'></script>"
+            "<script src='https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js'></script>"
+            "<script>(function(){try{var text=document.getElementById('source').textContent;"
+            "var d=Diagram.parse(text);d.drawSVG('diagram',{theme:'simple'});}catch(e){"
+            "var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    existing_paths = {getattr(r, "path", None) for r in getattr(app._api, "routes", [])}
+    if "/__embed/gist" not in existing_paths:
+        app._api.add_route("/__embed/gist", _api_embed_gist, methods=["GET"])
+    if "/__embed/sequence" not in existing_paths:
+        app._api.add_route("/__embed/sequence", _api_embed_sequence, methods=["GET"])
 
 
 class SlideShareEmbed:
@@ -341,7 +549,9 @@ class SequenceDiagramBlock:
     def render(self, block: FencedCodeBlock) -> str | None:
         # Prefer using a first-party endpoint for rendering, because markdown sanitizers
         # often strip iframe[srcdoc].
-        iframe_src = f"http://localhost:8000/__embed/sequence?code={quote_plus(block.code)}"
+        base = _backend_base_url()
+        query = urlencode({"code": block.code})
+        iframe_src = f"{base}/__embed/sequence?{query}"
         return (
             "\n<div class=\"my-4 w-full\">"
             "<iframe sandbox=\"allow-scripts allow-same-origin\" "
