@@ -136,6 +136,146 @@ def _encode_code_b64(code: str) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
+def _smart_quotes(text: str) -> str:
+    """Best-effort smart quotes (like HackMD/Remarkable typographer).
+
+    Applies to plain text only (caller must exclude code spans/blocks).
+    """
+
+    out: list[str] = []
+    n = len(text)
+
+    def _prev_nonspace(i: int) -> str:
+        j = i - 1
+        while j >= 0 and text[j].isspace():
+            j -= 1
+        return text[j] if j >= 0 else ""
+
+    def _next_nonspace(i: int) -> str:
+        j = i + 1
+        while j < n and text[j].isspace():
+            j += 1
+        return text[j] if j < n else ""
+
+    for i, ch in enumerate(text):
+        if ch == '"':
+            prev = _prev_nonspace(i)
+            nxt = _next_nonspace(i)
+            is_open = (not prev) or prev in "([{" or prev in "\n\r\t" or prev == "-"
+            # If followed by punctuation or end, treat as closing.
+            if not nxt or nxt in ")]}.,:;!?":
+                is_open = False
+            out.append("\u201c" if is_open else "\u201d")
+            continue
+
+        if ch == "'":
+            prev = _prev_nonspace(i)
+            nxt = _next_nonspace(i)
+            # Apostrophe in the middle of a word.
+            if prev.isalnum() and nxt.isalnum():
+                out.append("\u2019")
+                continue
+            is_open = (not prev) or prev in "([{" or prev in "\n\r\t" or prev == "-"
+            if not nxt or nxt in ")]}.,:;!?":
+                is_open = False
+            out.append("\u2018" if is_open else "\u2019")
+            continue
+
+        out.append(ch)
+
+    return "".join(out)
+
+
+def _apply_typography_to_text(text: str) -> str:
+    """Apply HackMD-like typographic replacements to plain text."""
+
+    if not text:
+        return text
+
+    s = text
+
+    # Symbols.
+    s = re.sub(r"\((?:c)\)", "\u00a9", s, flags=re.IGNORECASE)
+    s = re.sub(r"\((?:r)\)", "\u00ae", s, flags=re.IGNORECASE)
+    s = re.sub(r"\((?:tm)\)", "\u2122", s, flags=re.IGNORECASE)
+    s = re.sub(r"\((?:p)\)", "\u00a7", s, flags=re.IGNORECASE)
+    s = s.replace("+-", "\u00b1")
+
+    # Punctuation.
+    s = s.replace("---", "\u2014")  # em dash
+    s = s.replace("--", "\u2013")  # en dash
+    s = re.sub(r"\.{3}", "\u2026", s)  # ellipsis
+
+    # Collapse excessive punctuation (HackMD-like).
+    s = re.sub(r"!{4,}", "!!!", s)
+    s = re.sub(r"\?{4,}", "???", s)
+    s = re.sub(r",{2,}", ",", s)
+
+    # Quotes.
+    s = _smart_quotes(s)
+
+    return s
+
+
+def apply_hackmd_typography(markdown_text: str) -> str:
+    """Apply HackMD-like typography substitutions to markdown.
+
+    - Skips fenced code blocks and inline code spans.
+    - Leaves embed directives `{% ... %}` untouched.
+    """
+
+    text = markdown_text or ""
+    out_parts: list[str] = []
+    last = 0
+
+    def _process_noncode(segment: str) -> str:
+        if not segment:
+            return segment
+
+        # Do not transform inside embed directives.
+        parts: list[str] = []
+        pos = 0
+        for m in _DIRECTIVE_RE.finditer(segment):
+            before = segment[pos : m.start()]
+            raw = m.group(0)
+            parts.append(before)
+            parts.append(raw)
+            pos = m.end()
+        parts.append(segment[pos:])
+
+        # Apply typography to each non-directive chunk, preserving inline code.
+        for i, chunk in enumerate(parts):
+            if i % 2 == 1:
+                out_parts.append(chunk)
+                continue
+
+            # Split on inline code spans (backticks) and only transform non-code.
+            buf = chunk
+            j = 0
+            while j < len(buf):
+                tick = buf.find("`", j)
+                if tick == -1:
+                    out_parts.append(_apply_typography_to_text(buf[j:]))
+                    break
+                # Find matching tick.
+                end = buf.find("`", tick + 1)
+                if end == -1:
+                    out_parts.append(_apply_typography_to_text(buf[j:]))
+                    break
+                out_parts.append(_apply_typography_to_text(buf[j:tick]))
+                out_parts.append(buf[tick : end + 1])
+                j = end + 1
+        return ""
+
+    for match in _FENCED_BLOCK_RE.finditer(text):
+        _process_noncode(text[last : match.start()])
+        out_parts.append(match.group(0))
+        last = match.end()
+    _process_noncode(text[last:])
+
+    return "".join(out_parts)
+
+
 def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
     """Fetch oEmbed HTML with a tiny in-memory cache."""
 

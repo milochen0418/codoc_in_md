@@ -6,7 +6,11 @@ import uuid
 import logging
 from typing import TypedDict, Optional
 
-from .embeds import apply_hackmd_embeds
+from .embeds import apply_hackmd_embeds, apply_hackmd_typography
+
+
+def _render_markdown_source(source: str) -> str:
+    return apply_hackmd_embeds(apply_hackmd_typography(source))
 
 
 class Document(TypedDict):
@@ -152,12 +156,12 @@ class EditorState(rx.State):
         async with self:
             if db_doc:
                 self.doc_content = db_doc["content"]
-                self.doc_content_rendered = apply_hackmd_embeds(self.doc_content)
+                self.doc_content_rendered = _render_markdown_source(self.doc_content)
                 self.last_version = db_doc["version"]
             else:
                 default_content = "# Start typing your masterpiece..."
                 self.doc_content = default_content
-                self.doc_content_rendered = apply_hackmd_embeds(default_content)
+                self.doc_content_rendered = _render_markdown_source(default_content)
                 self._save_doc_to_db(doc_id, default_content)
                 self.last_version = 1
             self.is_connected = True
@@ -197,7 +201,7 @@ class EditorState(rx.State):
                 if remote_doc and remote_doc["version"] > self.last_version:
                     if remote_doc["content"] != self.doc_content:
                         self.doc_content = remote_doc["content"]
-                        self.doc_content_rendered = apply_hackmd_embeds(self.doc_content)
+                        self.doc_content_rendered = _render_markdown_source(self.doc_content)
                         self.last_version = remote_doc["version"]
 
             await asyncio.sleep(0.5)
@@ -208,7 +212,7 @@ class EditorState(rx.State):
         Updates the document content locally and persists to in-memory store.
         """
         self.doc_content = new_content
-        self.doc_content_rendered = apply_hackmd_embeds(new_content)
+        self.doc_content_rendered = _render_markdown_source(new_content)
         self._save_doc_to_db(self.doc_id, new_content)
 
     @rx.event
