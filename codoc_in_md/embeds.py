@@ -66,7 +66,9 @@ _DIRECTIVE_RE = re.compile(
 )
 
 _FENCED_BLOCK_RE = re.compile(
-    r"```(?P<info>[^\n]*)\r?\n(?P<body>.*?)(?:\r?\n)```",
+    # Only match *exactly* triple-backtick fences.
+    # This avoids breaking markdown that uses longer fences like ````` to show ``` literally.
+    r"```(?!`)(?P<info>[^\n]*)\r?\n(?P<body>.*?)(?:\r?\n)```(?!`)",
     re.DOTALL,
 )
 
@@ -226,7 +228,6 @@ def apply_hackmd_typography(markdown_text: str) -> str:
 
     text = markdown_text or ""
     out_parts: list[str] = []
-    last = 0
 
     def _process_noncode(segment: str) -> str:
         if not segment:
@@ -267,17 +268,51 @@ def apply_hackmd_typography(markdown_text: str) -> str:
                 j = end + 1
         return ""
 
-    for match in _FENCED_BLOCK_RE.finditer(text):
-        _process_noncode(text[last : match.start()])
-        out_parts.append(match.group(0))
-        last = match.end()
-    _process_noncode(text[last:])
+    # Robust fenced-block skipping: supports 3+ backticks/tildes and won't be confused by
+    # longer fences like ````` used to show ``` literally.
+    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    lines = text.splitlines(keepends=True)
+    i = 0
+    buf: list[str] = []
 
+    def _flush_buf():
+        if not buf:
+            return
+        _process_noncode("".join(buf))
+        buf.clear()
+
+    while i < len(lines):
+        line = lines[i].rstrip("\r\n")
+        m_open = fence_open_re.match(line)
+        if not m_open:
+            buf.append(lines[i])
+            i += 1
+            continue
+
+        _flush_buf()
+
+        indent = m_open.group("indent")
+        fence = m_open.group("fence")
+        fence_char = fence[0]
+        fence_len = len(fence)
+        close_re = re.compile(rf"^{re.escape(indent)}{re.escape(fence_char)}{{{fence_len},}}\s*$")
+
+        out_parts.append(lines[i])
+        i += 1
+        while i < len(lines) and not close_re.match(lines[i].rstrip("\r\n")):
+            out_parts.append(lines[i])
+            i += 1
+        if i < len(lines):
+            out_parts.append(lines[i])
+            i += 1
+
+    _flush_buf()
     return "".join(out_parts)
 
 
 _CODE_FENCE_RE = re.compile(
-    r"```(?P<info>[^\n]*)\r?\n(?P<body>.*?)(?:\r?\n)```",
+    # Only match *exactly* triple-backtick fences. See `_FENCED_BLOCK_RE`.
+    r"```(?!`)(?P<info>[^\n]*)\r?\n(?P<body>.*?)(?:\r?\n)```(?!`)",
     re.DOTALL,
 )
 
@@ -298,71 +333,91 @@ def apply_hackmd_code_fence_options(markdown_text: str) -> str:
     text = markdown_text or ""
     last_end_line: int | None = None
 
-    def _line_count(body: str) -> int:
-        if body is None:
-            return 0
-        # markdown fences capture body without the trailing newline before closing ```.
-        if body == "":
-            return 0
-        return body.count("\n") + 1
+    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
 
-    def _rewrite(match: re.Match) -> str:
-        nonlocal last_end_line
-        info = (match.group("info") or "").rstrip("\r")
-        body = match.group("body") or ""
+    def _count_body_lines(body_lines: list[str]) -> int:
+        return len(body_lines)
+
+    while i < len(lines):
+        line = lines[i].rstrip("\r\n")
+        m_open = fence_open_re.match(line)
+        if not m_open:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        indent = m_open.group("indent")
+        fence = m_open.group("fence")
+        info = (m_open.group("info") or "").rstrip("\r")
+        fence_char = fence[0]
+        fence_len = len(fence)
+        close_re = re.compile(rf"^{re.escape(indent)}{re.escape(fence_char)}{{{fence_len},}}\s*$")
+
+        j = i + 1
+        body_lines: list[str] = []
+        while j < len(lines) and not close_re.match(lines[j].rstrip("\r\n")):
+            body_lines.append(lines[j])
+            j += 1
+
+        # No closing fence: emit verbatim.
+        if j >= len(lines):
+            out.append(lines[i])
+            out.extend(body_lines)
+            break
 
         stripped = info.strip()
-        if not stripped:
-            return match.group(0)
+        if stripped:
+            parts = stripped.split(None, 1)
+            token = parts[0]
+            rest = parts[1] if len(parts) > 1 else ""
 
-        # Only rewrite the first token; keep the rest intact.
-        parts = stripped.split(None, 1)
-        token = parts[0]
-        rest = parts[1] if len(parts) > 1 else ""
+            wrap = False
+            if token.endswith("!"):
+                wrap = True
+                token = token[:-1]
+            if wrap and not token:
+                token = "markdown"
 
-        wrap = False
-        if token.endswith("!"):
-            wrap = True
-            token = token[:-1]
+            start_line: int | None = None
+            if "=" in token:
+                base, opt = token.split("=", 1)
+                base = base.strip()
+                opt = opt.strip()
+                if opt == "+":
+                    start_line = (last_end_line + 1) if last_end_line else 1
+                elif opt.isdigit():
+                    start_line = int(opt)
+                else:
+                    start_line = 1
+                token = base
 
-        # Handle `!` with no language by forcing a safe base language.
-        if wrap and not token:
-            token = "markdown"
+            out_token = token
+            if start_line is not None:
+                out_token = f"{token}-linenos-{start_line}"
+            if wrap:
+                out_token = f"{out_token}-wrap" if out_token else "markdown-wrap"
 
-        if "=" in token:
-            lang, _, spec = token.partition("=")
-            spec = spec.strip()
+            new_info = out_token if not rest else f"{out_token} {rest}".rstrip()
+            line_end = lines[i][len(lines[i].rstrip("\r\n")) :]
+            out.append(f"{indent}{fence}{new_info}{line_end}")
 
-            start: int | None
-            if spec == "+":
-                start = (last_end_line + 1) if last_end_line is not None else 1
-            elif spec == "":
-                start = 1
-            elif spec.isdigit():
-                start = int(spec)
-            else:
-                start = None
+            if start_line is not None:
+                count = _count_body_lines(body_lines)
+                if count > 0:
+                    last_end_line = start_line + count - 1
+                else:
+                    last_end_line = start_line
+        else:
+            out.append(lines[i])
 
-            if start is not None:
-                cnt = _line_count(body)
-                last_end_line = start + max(cnt - 1, 0)
-                # Encode options into a parser-friendly token.
-                base = (lang or "markdown")
-                token = f"{base}-linenos-{start}"
-            else:
-                # Unknown spec: keep original token.
-                token = parts[0]
+        out.extend(body_lines)
+        out.append(lines[j])
+        i = j + 1
 
-        if wrap and token and not token.endswith("-wrap"):
-            token = token + "-wrap"
-
-        new_info = (token + (" " + rest if rest else "")).rstrip()
-        # Preserve original leading/trailing spaces on the info line.
-        prefix = info[: len(info) - len(info.lstrip(" "))]
-        suffix = info[len(info.rstrip(" ")) :]
-        return f"```{prefix}{new_info}{suffix}\n{body}\n```"
-
-    return _CODE_FENCE_RE.sub(_rewrite, text)
+    return "".join(out)
 
 
 def apply_hackmd_code_blocks_with_lines(markdown_text: str) -> str:
@@ -403,7 +458,9 @@ def apply_hackmd_code_blocks_with_lines(markdown_text: str) -> str:
         "console": "text",
     }
 
-    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})```(?P<info>.*?)(?:\r?\n)?$")
+    fence_open_re = re.compile(
+        r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
+    )
 
     lines = text.splitlines(keepends=True)
     out: list[str] = []
@@ -478,19 +535,25 @@ def apply_hackmd_code_blocks_with_lines(markdown_text: str) -> str:
         )
 
     while i < len(lines):
-        m_open = fence_open_re.match(lines[i])
+        line = lines[i].rstrip("\r\n")
+        m_open = fence_open_re.match(line)
         if not m_open:
             out.append(lines[i])
             i += 1
             continue
 
         indent = m_open.group("indent")
+        fence = m_open.group("fence")
+        fence_char = fence[0]
+        fence_len = len(fence)
         info = m_open.group("info") or ""
         j = i + 1
         body_lines: list[str] = []
 
-        fence_close_re = re.compile(rf"^{re.escape(indent)}```\s*(?:\r?\n)?$")
-        while j < len(lines) and not fence_close_re.match(lines[j]):
+        fence_close_re = re.compile(
+            rf"^{re.escape(indent)}{re.escape(fence_char)}{{{fence_len},}}\s*$"
+        )
+        while j < len(lines) and not fence_close_re.match(lines[j].rstrip("\r\n")):
             body_lines.append(lines[j])
             j += 1
 
@@ -1285,13 +1348,49 @@ def apply_hackmd_embeds(markdown_text: str, *, extensions: dict[str, EmbedExtens
         return _DIRECTIVE_RE.sub(_replace, segment)
 
     out_parts: list[str] = []
-    last = 0
-    for match in _FENCED_BLOCK_RE.finditer(text):
-        # Apply directive replacements only in non-code segments.
-        out_parts.append(_replace_directives(text[last : match.start()]))
 
-        raw = match.group(0)
-        info = (match.group("info") or "").strip()
+    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    lines = text.splitlines(keepends=True)
+    i = 0
+    buf: list[str] = []
+
+    def _flush_buf():
+        if not buf:
+            return
+        out_parts.append(_replace_directives("".join(buf)))
+        buf.clear()
+
+    while i < len(lines):
+        line = lines[i].rstrip("\r\n")
+        m_open = fence_open_re.match(line)
+        if not m_open:
+            buf.append(lines[i])
+            i += 1
+            continue
+
+        _flush_buf()
+
+        indent = m_open.group("indent")
+        fence = m_open.group("fence")
+        info = (m_open.group("info") or "").strip()
+        fence_char = fence[0]
+        fence_len = len(fence)
+        close_re = re.compile(rf"^{re.escape(indent)}{re.escape(fence_char)}{{{fence_len},}}\s*$")
+
+        j = i + 1
+        body_lines: list[str] = []
+        while j < len(lines) and not close_re.match(lines[j].rstrip("\r\n")):
+            body_lines.append(lines[j])
+            j += 1
+
+        if j >= len(lines):
+            # Unclosed fence: treat as literal text.
+            buf.append(lines[i])
+            buf.extend(body_lines)
+            break
+
+        raw = "".join([lines[i], *body_lines, lines[j]])
+
         token = (info.split(None, 1)[0] if info else "").strip()
         # HackMD-style options live on the first token: lang=101, lang=+, lang!
         if token.endswith("!"):
@@ -1299,17 +1398,22 @@ def apply_hackmd_embeds(markdown_text: str, *, extensions: dict[str, EmbedExtens
         if "=" in token:
             token = token.split("=", 1)[0]
         lang = token.strip().lower()
-        body = match.group("body") or ""
+
+        code = "".join(body_lines)
+        # Match old behavior: fenced body excludes the newline right before the closing fence.
+        if code.endswith("\n"):
+            code = code[:-1]
+            if code.endswith("\r"):
+                code = code[:-1]
+
         block_ext = FENCED_BLOCK_EXTENSIONS.get(lang)
         if block_ext:
-            rendered = block_ext.render(
-                FencedCodeBlock(language=lang, code=body, raw=raw)
-            )
+            rendered = block_ext.render(FencedCodeBlock(language=lang, code=code, raw=raw))
             out_parts.append(rendered if rendered is not None else raw)
         else:
             out_parts.append(raw)
 
-        last = match.end()
+        i = j + 1
 
-    out_parts.append(_replace_directives(text[last:]))
+    _flush_buf()
     return "".join(out_parts)

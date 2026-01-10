@@ -7,4 +7,4 @@ assets/external/
 .states/
 __pycache__/
 /app/__pycache__/
-.playwright-mcp/ 
+.playwright-mcp/
