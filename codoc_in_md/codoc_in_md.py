@@ -46,7 +46,8 @@ def preview_panel() -> rx.Component:
                     text, class_name="text-xl font-bold text-gray-800 mt-4 mb-2"
                 ),
                 "p": lambda text: rx.el.p(
-                    text, class_name="mb-4 text-gray-700 leading-relaxed"
+                    text,
+                    class_name="mb-4 text-gray-700 leading-relaxed whitespace-pre-wrap",
                 ),
                 "ul": lambda text: rx.el.ul(
                     text, class_name="list-disc list-inside mb-4 pl-4"
@@ -54,7 +55,9 @@ def preview_panel() -> rx.Component:
                 "ol": lambda text: rx.el.ol(
                     text, class_name="list-decimal list-inside mb-4 pl-4"
                 ),
-                "li": lambda text: rx.el.li(text, class_name="mb-1 text-gray-700"),
+                "li": lambda text: rx.el.li(
+                    text, class_name="mb-1 text-gray-700 whitespace-pre-wrap"
+                ),
                 "blockquote": lambda text: rx.el.blockquote(
                     text, class_name="border-l-4 border-gray-300 pl-4 italic my-4"
                 ),

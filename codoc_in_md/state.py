@@ -21,6 +21,12 @@ class User(TypedDict):
     last_seen: float
 
 
+class DisplayUser(TypedDict):
+    id: str
+    name: str
+    color: str
+
+
 DOCUMENTS_STORE: dict[str, Document] = {}
 
 
@@ -51,7 +57,7 @@ class EditorState(rx.State):
 
     doc_id: str = ""
     doc_content: str = ""
-    users: list[User] = []
+    users: list[DisplayUser] = []
     my_user_id: str = ""
     my_user_name: str = ""
     my_user_color: str = ""
@@ -157,22 +163,37 @@ class EditorState(rx.State):
                 if not self.is_syncing:
                     break
                 current_doc_id = self.doc_id
-                me = {
+                me: User = {
                     "id": self.my_user_id,
                     "name": self.my_user_name,
                     "color": self.my_user_color,
                     "last_seen": time.time(),
                 }
-                SharedState.update_user(current_doc_id, me)
-                current_users = SharedState.get_active_users(current_doc_id)
-                current_users.sort(key=lambda u: u["name"])
-                self.users = current_users
+
+            # Keep ephemeral presence tracking server-side.
+            SharedState.update_user(current_doc_id, me)
+            current_users = SharedState.get_active_users(current_doc_id)
+            current_users.sort(key=lambda u: u["name"])
+
+            display_users: list[DisplayUser] = [
+                {"id": u["id"], "name": u["name"], "color": u["color"]}
+                for u in current_users
+            ]
+
+            # Only write to state if something visible changed.
+            async with self:
+                if not self.is_syncing:
+                    break
+                if display_users != self.users:
+                    self.users = display_users
+
             remote_doc = self._get_doc_from_db(current_doc_id)
             async with self:
                 if remote_doc and remote_doc["version"] > self.last_version:
                     if remote_doc["content"] != self.doc_content:
                         self.doc_content = remote_doc["content"]
                         self.last_version = remote_doc["version"]
+
             await asyncio.sleep(0.5)
 
     @rx.event
