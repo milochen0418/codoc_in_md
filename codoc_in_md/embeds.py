@@ -265,7 +265,9 @@ class GistEmbed:
         if "gist.github.com" in value and not value.rstrip("/").endswith(".js"):
             gist_js = value.rstrip("/") + ".js"
 
-        iframe_src = f"/__embed/gist?url={quote_plus(gist_js)}"
+        # Use the backend port for static HTML so the gist embed script executes
+        # during HTML parsing (it uses document.write).
+        iframe_src = f"http://localhost:8000/__embed/gist?url={quote_plus(gist_js)}"
         return (
             "\n<div class=\"my-4 w-full\">"
             "<iframe sandbox=\"allow-scripts allow-same-origin\" "
@@ -339,7 +341,7 @@ class SequenceDiagramBlock:
     def render(self, block: FencedCodeBlock) -> str | None:
         # Prefer using a first-party endpoint for rendering, because markdown sanitizers
         # often strip iframe[srcdoc].
-        iframe_src = f"/__embed/sequence?code={quote_plus(block.code)}"
+        iframe_src = f"http://localhost:8000/__embed/sequence?code={quote_plus(block.code)}"
         return (
             "\n<div class=\"my-4 w-full\">"
             "<iframe sandbox=\"allow-scripts allow-same-origin\" "
