@@ -33,7 +33,7 @@ def preview_panel() -> rx.Component:
     """The markdown preview panel."""
     return rx.el.div(
         rx.markdown(
-            EditorState.doc_content,
+            EditorState.doc_content_rendered,
             component_map={
                 "h1": lambda text: rx.el.h1(
                     text, class_name="text-3xl font-bold text-gray-900 mb-4"

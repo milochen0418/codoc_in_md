@@ -14,4 +14,10 @@ else
 fi
 
 echo "Starting Reflex app with args: $@"
-poetry run reflex run "$@"
+
+# If this script is executed via `poetry run`, avoid nesting Poetry.
+if [ -n "${POETRY_ACTIVE:-}" ]; then
+  reflex run "$@"
+else
+  poetry run reflex run "$@"
+fi
