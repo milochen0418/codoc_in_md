@@ -124,5 +124,60 @@ app = rx.App(
         ),
     ],
 )
+
+
+def embed_sequence() -> rx.Component:
+    """Client-side sequence diagram renderer (for iframe embedding)."""
+
+    return rx.el.div(
+        rx.el.div(id="diagram", class_name="w-full"),
+        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/webfont.js"),
+        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/snap.svg-min.js"),
+        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/underscore-min.js"),
+        rx.el.script(src="https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js"),
+        rx.el.script(
+            """
+            (function(){
+              try {
+                var params = new URLSearchParams(window.location.search);
+                var code = params.get('code') || '';
+                code = decodeURIComponent(code);
+                if (!code) return;
+                var d = Diagram.parse(code);
+                d.drawSVG('diagram', { theme: 'simple' });
+              } catch (e) {
+                var pre = document.createElement('pre');
+                pre.textContent = (new URLSearchParams(window.location.search)).get('code') || '';
+                document.body.appendChild(pre);
+              }
+            })();
+            """,
+        ),
+        style={"padding": "12px", "fontFamily": "sans-serif"},
+    )
+
+
+def embed_gist() -> rx.Component:
+    """Client-side gist renderer (for iframe embedding)."""
+
+    return rx.el.div(
+        rx.el.script(
+            """
+            (function(){
+              var params = new URLSearchParams(window.location.search);
+              var url = params.get('url') || '';
+              try { url = decodeURIComponent(url); } catch (e) {}
+              if (!url) return;
+              var s = document.createElement('script');
+              s.src = url;
+              document.body.appendChild(s);
+            })();
+            """,
+        ),
+        style={"margin": "0", "padding": "0"},
+    )
+
 app.add_page(index, route="/doc/[document_id]", on_load=EditorState.on_load)
 app.add_page(index, route="/", on_load=EditorState.on_load)
+app.add_page(embed_sequence, route="/__embed/sequence")
+app.add_page(embed_gist, route="/__embed/gist")

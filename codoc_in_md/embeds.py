@@ -13,7 +13,10 @@ from dataclasses import dataclass
 import html
 import re
 from typing import Protocol
-from urllib.parse import parse_qs, urlparse
+import json
+import time
+from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +105,39 @@ def _extract_youtube_id(value: str) -> str | None:
         if re.fullmatch(r"[A-Za-z0-9_-]{6,64}", candidate):
             return candidate
 
+    return None
+
+
+_OEMBED_CACHE: dict[str, tuple[float, str]] = {}
+_OEMBED_TTL_S = 60 * 60 * 24
+
+
+def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
+    """Fetch oEmbed HTML with a tiny in-memory cache."""
+
+    cache_key = f"{endpoint}|{target_url}"
+    now = time.time()
+    cached = _OEMBED_CACHE.get(cache_key)
+    if cached and now - cached[0] < _OEMBED_TTL_S:
+        return cached[1]
+
+    full_url = endpoint
+    if "?" in endpoint:
+        full_url = endpoint + "&" + urlencode({"url": target_url, "format": "json"})
+    else:
+        full_url = endpoint + "?" + urlencode({"url": target_url, "format": "json"})
+
+    try:
+        req = Request(full_url, headers={"User-Agent": "codoc-in-md"})
+        with urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return None
+
+    html_snippet = data.get("html") if isinstance(data, dict) else None
+    if isinstance(html_snippet, str) and html_snippet.strip():
+        _OEMBED_CACHE[cache_key] = (now, html_snippet)
+        return html_snippet
     return None
 
 
@@ -218,26 +254,81 @@ class GistEmbed:
         if not value:
             return None
 
-        # Expect a full gist URL, or a direct .js embed URL.
-        gist_js_url: str | None = None
-        if value.lower().startswith("https://"):
-            gist_js_url = value
-        else:
-            return None
+        # HackMD allows shorthand like `user/gist_id`.
+        if not value.lower().startswith("https://"):
+            if re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9]+", value):
+                value = f"https://gist.github.com/{value}"
+            else:
+                return None
 
-        # Render via iframe+srcdoc so the gist's embed script can execute.
-        srcdoc = (
-            "<!doctype html><html><head><meta charset='utf-8'/>"
-            "<style>body{margin:0;padding:0} .gist{font-size:12px}</style>"
-            "</head><body>"
-            f"<script src='{_escape_attr(gist_js_url)}'></script>"
-            "</body></html>"
-        )
+        gist_js = value
+        if "gist.github.com" in value and not value.rstrip("/").endswith(".js"):
+            gist_js = value.rstrip("/") + ".js"
+
+        iframe_src = f"/__embed/gist?url={quote_plus(gist_js)}"
         return (
             "\n<div class=\"my-4 w-full\">"
             "<iframe sandbox=\"allow-scripts allow-same-origin\" "
             "style=\"width:100%;height:420px;border:0;\" "
-            f"srcdoc=\"{_escape_attr(srcdoc)}\"></iframe>"
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+            "</div>\n"
+        )
+
+
+class SlideShareEmbed:
+    name = "slideshare"
+
+    def render(self, directive: EmbedDirective) -> str | None:
+        value = (directive.args or "").strip()
+        if not value:
+            return None
+
+        url = value
+        if not url.lower().startswith("https://"):
+            # HackMD shorthand like `user/slug`.
+            url = f"https://www.slideshare.net/{url.lstrip('/')}"
+
+        html_snippet = _fetch_oembed_html(
+            endpoint="https://www.slideshare.net/api/oembed/2",
+            target_url=url,
+        )
+        if html_snippet:
+            return f"\n<div class=\"my-4 w-full\">{html_snippet}</div>\n"
+
+        # Fallback: try iframing the URL.
+        safe_url = html.escape(url, quote=True)
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            f"<iframe src=\"{safe_url}\" title=\"SlideShare\" "
+            "style=\"width:100%;height:520px;border:0;\"></iframe>"
+            "</div>\n"
+        )
+
+
+class SpeakerDeckEmbed:
+    name = "speakerdeck"
+
+    def render(self, directive: EmbedDirective) -> str | None:
+        value = (directive.args or "").strip()
+        if not value:
+            return None
+
+        url = value
+        if not url.lower().startswith("https://"):
+            url = f"https://speakerdeck.com/{url.lstrip('/')}"
+
+        html_snippet = _fetch_oembed_html(
+            endpoint="https://speakerdeck.com/oembed.json",
+            target_url=url,
+        )
+        if html_snippet:
+            return f"\n<div class=\"my-4 w-full\">{html_snippet}</div>\n"
+
+        safe_url = html.escape(url, quote=True)
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            f"<iframe src=\"{safe_url}\" title=\"SpeakerDeck\" "
+            "style=\"width:100%;height:520px;border:0;\"></iframe>"
             "</div>\n"
         )
 
@@ -246,29 +337,14 @@ class SequenceDiagramBlock:
     language = "sequence"
 
     def render(self, block: FencedCodeBlock) -> str | None:
-        source_html = html.escape(block.code)
-        srcdoc = (
-            "<!doctype html><html><head><meta charset='utf-8'/>"
-            "<meta name='viewport' content='width=device-width, initial-scale=1'/>"
-            "<style>body{margin:0;padding:12px;font-family:sans-serif} #diagram{width:100%}</style>"
-            "<script src='https://bramp.github.io/js-sequence-diagrams/js/webfont.js'></script>"
-            "<script src='https://bramp.github.io/js-sequence-diagrams/js/snap.svg-min.js'></script>"
-            "<script src='https://bramp.github.io/js-sequence-diagrams/js/underscore-min.js'></script>"
-            "<script src='https://bramp.github.io/js-sequence-diagrams/js/sequence-diagram-min.js'></script>"
-            "</head><body>"
-            f"<pre id='source' style='display:none'>{source_html}</pre>"
-            "<div id='diagram'></div>"
-            "<script>(function(){try{var text=document.getElementById('source').textContent;"
-            "var d=Diagram.parse(text);d.drawSVG('diagram',{theme:'simple'});}catch(e){"
-            "var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
-            "</body></html>"
-        )
-
+        # Prefer using a first-party endpoint for rendering, because markdown sanitizers
+        # often strip iframe[srcdoc].
+        iframe_src = f"/__embed/sequence?code={quote_plus(block.code)}"
         return (
             "\n<div class=\"my-4 w-full\">"
             "<iframe sandbox=\"allow-scripts allow-same-origin\" "
             "style=\"width:100%;height:360px;border:0;\" "
-            f"srcdoc=\"{_escape_attr(srcdoc)}\"></iframe>"
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
             "</div>\n"
         )
 
@@ -277,8 +353,8 @@ EMBED_EXTENSIONS: dict[str, EmbedExtension] = {
     "youtube": YouTubeEmbed(),
     "vimeo": VimeoEmbed(),
     "gist": GistEmbed(),
-    "slideshare": GenericIFrameEmbed("slideshare", title="SlideShare", height_px=520),
-    "speakerdeck": GenericIFrameEmbed("speakerdeck", title="SpeakerDeck", height_px=520),
+    "slideshare": SlideShareEmbed(),
+    "speakerdeck": SpeakerDeckEmbed(),
     "pdf": PdfEmbed(),
 }
 
