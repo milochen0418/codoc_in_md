@@ -33,6 +33,73 @@ def editor_panel() -> rx.Component:
 
 def preview_panel() -> rx.Component:
     """The markdown preview panel."""
+
+    def _children_to_text(children) -> str:
+        if children is None:
+            return ""
+        if isinstance(children, str):
+            return children
+        if isinstance(children, list):
+            return "".join(_children_to_text(c) for c in children)
+        return ""
+
+    def _markdown_pre(children):
+        # We render fenced code blocks via `rx.code_block` in the `code` component,
+        # so the surrounding <pre> from the markdown renderer should be removed.
+        if isinstance(children, list):
+            return rx.fragment(*children)
+        return rx.fragment(children)
+
+    def _markdown_code(node):
+        # Reflex markdown may pass either a raw string (inline code) or a props dict.
+        if isinstance(node, str):
+            return rx.el.code(
+                node,
+                class_name="bg-gray-100 rounded px-1 py-0.5 font-mono text-sm",
+            )
+
+        if isinstance(node, dict):
+            inline = bool(node.get("inline", False))
+            class_name = node.get("className") or node.get("class_name") or ""
+            code_text = _children_to_text(node.get("children"))
+
+            # Extract language from className like `language-javascript`.
+            lang = ""
+            if isinstance(class_name, str):
+                for part in class_name.split():
+                    if part.startswith("language-"):
+                        lang = part[len("language-") :]
+                        break
+
+            starting_line_number = None
+            if lang and "=" in lang:
+                lang, start = lang.split("=", 1)
+                start = start.strip()
+                if start.isdigit():
+                    starting_line_number = int(start)
+
+            lang = (lang or "text").strip()
+
+            if inline:
+                return rx.el.code(
+                    code_text,
+                    class_name="bg-gray-100 rounded px-1 py-0.5 font-mono text-sm",
+                )
+
+            props = {
+                "language": lang,
+                "show_line_numbers": True,
+            }
+            if starting_line_number is not None:
+                props["starting_line_number"] = starting_line_number
+            return rx.code_block(code_text, **props)
+
+        # Fallback (should be rare): try rendering as plain inline code.
+        return rx.el.code(
+            str(node),
+            class_name="bg-gray-100 rounded px-1 py-0.5 font-mono text-sm",
+        )
+
     return rx.el.div(
         rx.markdown(
             EditorState.doc_content_rendered,
@@ -63,9 +130,8 @@ def preview_panel() -> rx.Component:
                 "blockquote": lambda text: rx.el.blockquote(
                     text, class_name="border-l-4 border-gray-300 pl-4 italic my-4"
                 ),
-                "code": lambda text: rx.el.code(
-                    text, class_name="bg-gray-100 rounded px-1 py-0.5 font-mono text-sm"
-                ),
+                "pre": _markdown_pre,
+                "code": _markdown_code,
             },
         ),
         class_name="h-full w-full p-8 overflow-auto bg-white",
