@@ -10,6 +10,7 @@ Add new embed types by registering an implementation in EMBED_EXTENSIONS.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import ipaddress
 import html
 import os
 import re
@@ -21,7 +22,7 @@ from urllib.request import Request, urlopen
 
 import reflex as rx
 from starlette.requests import Request as StarletteRequest
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, Response
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,7 +348,12 @@ class PdfEmbed:
         if not url.lower().startswith("https://"):
             return None
 
-        safe_url = html.escape(url, quote=True)
+        # Many sites block being embedded in an iframe (X-Frame-Options/CSP).
+        # Proxy via the backend so the iframe is same-origin.
+        base = _backend_base_url()
+        query = urlencode({"url": url})
+        iframe_src = f"{base}/__embed/pdf?{query}"
+        safe_url = html.escape(iframe_src, quote=True)
         return (
             "\n<div class=\"my-4 w-full\">"
             f"<iframe src=\"{safe_url}\" title=\"PDF\" "
@@ -478,11 +484,79 @@ def register_backend_embed_routes(app: rx.App) -> None:
         )
         return HTMLResponse(_embed_html(body))
 
+    def _api_embed_pdf(request: StarletteRequest) -> Response:
+        url = (request.query_params.get("url") or "").strip()
+        if not url or not url.lower().startswith("https://"):
+            return HTMLResponse(_embed_html("<pre>Invalid PDF URL</pre>"))
+
+        try:
+            parsed = urlparse(url)
+        except Exception:
+            return HTMLResponse(_embed_html("<pre>Invalid PDF URL</pre>"))
+
+        host = (parsed.hostname or "").strip()
+        if not host:
+            return HTMLResponse(_embed_html("<pre>Invalid PDF URL</pre>"))
+
+        # Basic SSRF protections.
+        host_l = host.lower()
+        if host_l in {"localhost"} or host_l.endswith(".local"):
+            return HTMLResponse(_embed_html("<pre>Blocked host</pre>"))
+
+        try:
+            ip = ipaddress.ip_address(host)
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_multicast
+                or ip.is_reserved
+            ):
+                return HTMLResponse(_embed_html("<pre>Blocked host</pre>"))
+        except ValueError:
+            # Not an IP literal; allow hostname.
+            pass
+
+        # Avoid non-standard ports.
+        if parsed.port not in (None, 443):
+            return HTMLResponse(_embed_html("<pre>Blocked port</pre>"))
+
+        try:
+            req = Request(url, headers={"User-Agent": "codoc-in-md"})
+            with urlopen(req, timeout=10) as resp:
+                content_type = (resp.headers.get("Content-Type") or "").lower()
+                max_bytes = 15 * 1024 * 1024
+                chunks: list[bytes] = []
+                total = 0
+                while True:
+                    chunk = resp.read(64 * 1024)
+                    if not chunk:
+                        break
+                    total += len(chunk)
+                    if total > max_bytes:
+                        return HTMLResponse(_embed_html("<pre>PDF too large</pre>"))
+                    chunks.append(chunk)
+        except Exception:
+            return HTMLResponse(_embed_html("<pre>Failed to fetch PDF</pre>"))
+
+        # Best-effort content-type validation (some servers mislabel PDFs).
+        if "application/pdf" not in content_type and not (parsed.path or "").lower().endswith(".pdf"):
+            return HTMLResponse(_embed_html("<pre>URL is not a PDF</pre>"))
+
+        data = b"".join(chunks)
+        return Response(
+            content=data,
+            media_type="application/pdf",
+            headers={"Content-Disposition": "inline"},
+        )
+
     existing_paths = {getattr(r, "path", None) for r in getattr(app._api, "routes", [])}
     if "/__embed/gist" not in existing_paths:
         app._api.add_route("/__embed/gist", _api_embed_gist, methods=["GET"])
     if "/__embed/sequence" not in existing_paths:
         app._api.add_route("/__embed/sequence", _api_embed_sequence, methods=["GET"])
+    if "/__embed/pdf" not in existing_paths:
+        app._api.add_route("/__embed/pdf", _api_embed_pdf, methods=["GET"])
 
 
 class SlideShareEmbed:
