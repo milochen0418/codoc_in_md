@@ -10,6 +10,8 @@ Add new embed types by registering an implementation in EMBED_EXTENSIONS.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import base64
+import binascii
 import ipaddress
 import html
 import os
@@ -125,6 +127,13 @@ def _backend_base_url() -> str:
     """
 
     return os.getenv("CODOC_BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def _encode_code_b64(code: str) -> str:
+    """Encode text to URL-safe base64 without padding."""
+
+    raw = (code or "").encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
 def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
@@ -443,6 +452,21 @@ def register_backend_embed_routes(app: rx.App) -> None:
             "</body></html>"
         )
 
+    def _get_code(request: StarletteRequest) -> str:
+        """Read code from query params.
+
+        Prefer `b64` to avoid URL-encoding issues for multi-line blocks.
+        """
+
+        b64 = (request.query_params.get("b64") or "").strip()
+        if b64:
+            try:
+                padded = b64 + "=" * (-len(b64) % 4)
+                return base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8")
+            except (binascii.Error, UnicodeDecodeError):
+                return ""
+        return (request.query_params.get("code") or "").strip()
+
     def _api_embed_gist(request: StarletteRequest) -> HTMLResponse:
         url = (request.query_params.get("url") or "").strip()
         if not url or not url.lower().startswith("https://"):
@@ -462,7 +486,7 @@ def register_backend_embed_routes(app: rx.App) -> None:
         return HTMLResponse(_embed_html(body))
 
     def _api_embed_sequence(request: StarletteRequest) -> HTMLResponse:
-        code = (request.query_params.get("code") or "").strip()
+        code = _get_code(request)
         if not code:
             return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
 
@@ -481,6 +505,119 @@ def register_backend_embed_routes(app: rx.App) -> None:
             "<script>(function(){try{var text=document.getElementById('source').textContent;"
             "var d=Diagram.parse(text);d.drawSVG('diagram',{theme:'simple'});}catch(e){"
             "var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    def _api_embed_flow(request: StarletteRequest) -> HTMLResponse:
+        code = _get_code(request)
+        if not code:
+            return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
+
+        safe_code = (
+            code.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        body = (
+            "<style>#diagram svg{max-width:100%;height:auto}</style>"
+            "<div id='diagram'></div>"
+            f"<pre id='source' style='display:none'>{safe_code}</pre>"
+            "<script src='https://cdnjs.cloudflare.com/ajax/libs/raphael/2.3.0/raphael.min.js'></script>"
+            "<script src='https://cdnjs.cloudflare.com/ajax/libs/flowchart/1.17.1/flowchart.min.js'></script>"
+            "<script>(function(){var text=document.getElementById('source').textContent;"
+            "try{var diagram=flowchart.parse(text);diagram.drawSVG('diagram');}"
+            "catch(e){var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    def _api_embed_graphviz(request: StarletteRequest) -> HTMLResponse:
+        code = _get_code(request)
+        if not code:
+            return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
+
+        safe_code = (
+            code.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        body = (
+            "<style>#diagram svg{max-width:100%;height:auto}</style>"
+            "<div id='diagram'></div>"
+            f"<pre id='source' style='display:none'>{safe_code}</pre>"
+            "<script src='https://cdn.jsdelivr.net/npm/viz.js@2.1.2/viz.js'></script>"
+            "<script src='https://cdn.jsdelivr.net/npm/viz.js@2.1.2/full.render.js'></script>"
+            "<script>(function(){var text=document.getElementById('source').textContent;"
+            "var container=document.getElementById('diagram');"
+            "try{var viz=new Viz();viz.renderSVGElement(text).then(function(el){container.appendChild(el);})"
+            ".catch(function(){var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);});}"
+            "catch(e){var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    def _api_embed_mermaid(request: StarletteRequest) -> HTMLResponse:
+        code = _get_code(request)
+        if not code:
+            return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
+
+        safe_code = (
+            code.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        body = (
+            "<style>#diagram svg{max-width:100%;height:auto}</style>"
+            "<div id='diagram' class='mermaid'></div>"
+            f"<pre id='source' style='display:none'>{safe_code}</pre>"
+            "<script src='https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js'></script>"
+            "<script>(function(){var el=document.getElementById('diagram');"
+            "el.textContent=document.getElementById('source').textContent;"
+            "try{mermaid.initialize({startOnLoad:false});mermaid.init(undefined, el);}"
+            "catch(e){var pre=document.createElement('pre');pre.textContent=el.textContent;document.body.appendChild(pre);}})();</script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    def _api_embed_abc(request: StarletteRequest) -> HTMLResponse:
+        code = _get_code(request)
+        if not code:
+            return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
+
+        safe_code = (
+            code.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        body = (
+            "<style>#paper svg{max-width:100%;height:auto}</style>"
+            "<div id='paper'></div>"
+            f"<pre id='source' style='display:none'>{safe_code}</pre>"
+            "<script src='https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js'></script>"
+            "<script>(function(){var text=document.getElementById('source').textContent;"
+            "try{ABCJS.renderAbc('paper', text, {responsive:'resize'});}"
+            "catch(e){var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
+        )
+        return HTMLResponse(_embed_html(body))
+
+    def _api_embed_vega(request: StarletteRequest) -> HTMLResponse:
+        code = _get_code(request)
+        if not code:
+            return HTMLResponse(_embed_html("<pre>(empty)</pre>"))
+
+        safe_code = (
+            code.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+        )
+        body = (
+            "<div id='vis'></div>"
+            f"<pre id='source' style='display:none'>{safe_code}</pre>"
+            "<script src='https://cdn.jsdelivr.net/npm/vega@5/build/vega.min.js'></script>"
+            "<script src='https://cdn.jsdelivr.net/npm/vega-lite@5/build/vega-lite.min.js'></script>"
+            "<script src='https://cdn.jsdelivr.net/npm/vega-embed@6/build/vega-embed.min.js'></script>"
+            "<script>(function(){var text=document.getElementById('source').textContent;"
+            "var target=document.getElementById('vis');var spec=null;"
+            "try{spec=JSON.parse(text);}catch(e){var pre=document.createElement('pre');pre.textContent='Invalid JSON';document.body.appendChild(pre);return;}"
+            "try{vegaEmbed(target, spec, {actions:false}).catch(function(){var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);});}"
+            "catch(e){var pre=document.createElement('pre');pre.textContent=text;document.body.appendChild(pre);}})();</script>"
         )
         return HTMLResponse(_embed_html(body))
 
@@ -555,6 +692,16 @@ def register_backend_embed_routes(app: rx.App) -> None:
         app._api.add_route("/__embed/gist", _api_embed_gist, methods=["GET"])
     if "/__embed/sequence" not in existing_paths:
         app._api.add_route("/__embed/sequence", _api_embed_sequence, methods=["GET"])
+    if "/__embed/flow" not in existing_paths:
+        app._api.add_route("/__embed/flow", _api_embed_flow, methods=["GET"])
+    if "/__embed/graphviz" not in existing_paths:
+        app._api.add_route("/__embed/graphviz", _api_embed_graphviz, methods=["GET"])
+    if "/__embed/mermaid" not in existing_paths:
+        app._api.add_route("/__embed/mermaid", _api_embed_mermaid, methods=["GET"])
+    if "/__embed/abc" not in existing_paths:
+        app._api.add_route("/__embed/abc", _api_embed_abc, methods=["GET"])
+    if "/__embed/vega" not in existing_paths:
+        app._api.add_route("/__embed/vega", _api_embed_vega, methods=["GET"])
     if "/__embed/pdf" not in existing_paths:
         app._api.add_route("/__embed/pdf", _api_embed_pdf, methods=["GET"])
 
@@ -624,12 +771,92 @@ class SequenceDiagramBlock:
         # Prefer using a first-party endpoint for rendering, because markdown sanitizers
         # often strip iframe[srcdoc].
         base = _backend_base_url()
-        query = urlencode({"code": block.code})
+        query = urlencode({"b64": _encode_code_b64(block.code)})
         iframe_src = f"{base}/__embed/sequence?{query}"
         return (
             "\n<div class=\"my-4 w-full\">"
             "<iframe sandbox=\"allow-scripts allow-same-origin\" "
             "style=\"width:100%;height:360px;border:0;\" "
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+            "</div>\n"
+        )
+
+
+class FlowChartBlock:
+    language = "flow"
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        base = _backend_base_url()
+        query = urlencode({"b64": _encode_code_b64(block.code)})
+        iframe_src = f"{base}/__embed/flow?{query}"
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            "<iframe sandbox=\"allow-scripts allow-same-origin\" "
+            "style=\"width:100%;height:420px;border:0;\" "
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+            "</div>\n"
+        )
+
+
+class GraphvizBlock:
+    language = "graphviz"
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        base = _backend_base_url()
+        query = urlencode({"b64": _encode_code_b64(block.code)})
+        iframe_src = f"{base}/__embed/graphviz?{query}"
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            "<iframe sandbox=\"allow-scripts allow-same-origin\" "
+            "style=\"width:100%;height:420px;border:0;\" "
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+            "</div>\n"
+        )
+
+
+class MermaidBlock:
+    language = "mermaid"
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        base = _backend_base_url()
+        query = urlencode({"b64": _encode_code_b64(block.code)})
+        iframe_src = f"{base}/__embed/mermaid?{query}"
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            "<iframe sandbox=\"allow-scripts allow-same-origin\" "
+            "style=\"width:100%;height:420px;border:0;\" "
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+            "</div>\n"
+        )
+
+
+class AbcBlock:
+    language = "abc"
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        base = _backend_base_url()
+        query = urlencode({"b64": _encode_code_b64(block.code)})
+        iframe_src = f"{base}/__embed/abc?{query}"
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            "<iframe sandbox=\"allow-scripts allow-same-origin\" "
+            "style=\"width:100%;height:420px;border:0;\" "
+            f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
+            "</div>\n"
+        )
+
+
+class VegaLiteBlock:
+    language = "vega"
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        base = _backend_base_url()
+        query = urlencode({"b64": _encode_code_b64(block.code)})
+        iframe_src = f"{base}/__embed/vega?{query}"
+        return (
+            "\n<div class=\"my-4 w-full\">"
+            "<iframe sandbox=\"allow-scripts allow-same-origin\" "
+            "style=\"width:100%;height:520px;border:0;\" "
             f"src=\"{html.escape(iframe_src, quote=True)}\"></iframe>"
             "</div>\n"
         )
@@ -647,6 +874,14 @@ EMBED_EXTENSIONS: dict[str, EmbedExtension] = {
 
 FENCED_BLOCK_EXTENSIONS: dict[str, FencedBlockExtension] = {
     "sequence": SequenceDiagramBlock(),
+    "flow": FlowChartBlock(),
+    "flowchart": FlowChartBlock(),
+    "graphviz": GraphvizBlock(),
+    "dot": GraphvizBlock(),
+    "mermaid": MermaidBlock(),
+    "abc": AbcBlock(),
+    "vega": VegaLiteBlock(),
+    "vega-lite": VegaLiteBlock(),
 }
 
 
