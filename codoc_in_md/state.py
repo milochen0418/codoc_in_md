@@ -129,7 +129,8 @@ class EditorState(rx.State):
     @rx.event(background=True)
     async def on_load(self):
         """Initializes the session for the specific document ID."""
-        doc_id = self.router.page.params.get("document_id", "")
+        path = getattr(self.router.url, "path", "")
+        doc_id = path.rstrip("/").split("/")[-1] if path else ""
         async with self:
             if not doc_id:
                 new_id = str(uuid.uuid4())[:8]

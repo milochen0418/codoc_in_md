@@ -7,7 +7,7 @@ packages = [{include = "codoc_in_md"}]
 
 [tool.poetry.dependencies]
 python = "~3.11"
-reflex = "0.8.24"
+reflex = "0.8.24.post1"
 reflex-monaco = "*"
 
 [build-system]
