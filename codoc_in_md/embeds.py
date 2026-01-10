@@ -276,6 +276,88 @@ def apply_hackmd_typography(markdown_text: str) -> str:
     return "".join(out_parts)
 
 
+_CODE_FENCE_RE = re.compile(
+    r"```(?P<info>[^\n]*)\r?\n(?P<body>.*?)(?:\r?\n)```",
+    re.DOTALL,
+)
+
+
+def apply_hackmd_code_fence_options(markdown_text: str) -> str:
+    """Apply HackMD-like code fence options.
+
+    Supports:
+    - ```lang=101  : show line numbers starting from 101
+    - ```lang=     : show line numbers starting from 1
+    - ```lang=+    : continue line numbers from previous code block
+    - ```lang!     : wrap long lines in code block
+
+    This function rewrites the fence info string only; it does not modify code content.
+    """
+
+    text = markdown_text or ""
+    last_end_line: int | None = None
+
+    def _line_count(body: str) -> int:
+        if body is None:
+            return 0
+        # markdown fences capture body without the trailing newline before closing ```.
+        if body == "":
+            return 0
+        return body.count("\n") + 1
+
+    def _rewrite(match: re.Match) -> str:
+        nonlocal last_end_line
+        info = (match.group("info") or "").rstrip("\r")
+        body = match.group("body") or ""
+
+        stripped = info.strip()
+        if not stripped:
+            return match.group(0)
+
+        # Only rewrite the first token; keep the rest intact.
+        parts = stripped.split(None, 1)
+        token = parts[0]
+        rest = parts[1] if len(parts) > 1 else ""
+
+        wrap = False
+        if token.endswith("!"):
+            wrap = True
+            token = token[:-1]
+
+        if "=" in token:
+            lang, _, spec = token.partition("=")
+            spec = spec.strip()
+
+            start: int | None
+            if spec == "+":
+                start = (last_end_line + 1) if last_end_line is not None else 1
+            elif spec == "":
+                start = 1
+            elif spec.isdigit():
+                start = int(spec)
+            else:
+                start = None
+
+            if start is not None:
+                cnt = _line_count(body)
+                last_end_line = start + max(cnt - 1, 0)
+                token = f"{lang}={start}"
+            else:
+                # Unknown spec: keep original token.
+                token = parts[0]
+
+        if wrap and not token.endswith("!"):
+            token = token + "!"
+
+        new_info = token + (" " + rest if rest else "")
+        # Preserve original leading/trailing spaces on the info line.
+        prefix = info[: len(info) - len(info.lstrip(" "))]
+        suffix = info[len(info.rstrip(" ")) :]
+        return f"```{prefix}{new_info}{suffix}\n{body}\n```"
+
+    return _CODE_FENCE_RE.sub(_rewrite, text)
+
+
 def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
     """Fetch oEmbed HTML with a tiny in-memory cache."""
 

@@ -71,14 +71,49 @@ def preview_panel() -> rx.Component:
                         lang = part[len("language-") :]
                         break
 
+            raw_lang = (lang or "").strip()
+            wrap_long = False
+            if raw_lang.endswith("!"):
+                wrap_long = True
+                raw_lang = raw_lang[:-1]
+
+            show_line_numbers = False
             starting_line_number = None
-            if lang and "=" in lang:
-                lang, start = lang.split("=", 1)
+            if "=" in raw_lang:
+                show_line_numbers = True
+                raw_lang, start = raw_lang.split("=", 1)
                 start = start.strip()
                 if start.isdigit():
                     starting_line_number = int(start)
+                else:
+                    # ```lang=  means start from 1
+                    starting_line_number = 1
 
-            lang = (lang or "text").strip()
+            lang = (raw_lang or "").strip().lower()
+
+            # Common aliases (HackMD-style convenience).
+            aliases = {
+                "js": "javascript",
+                "ts": "typescript",
+                "py": "python",
+                "sh": "bash",
+                "shell": "bash",
+                "zsh": "bash",
+                "yml": "yaml",
+                "md": "markdown",
+                "html": "markup",
+                "xml": "markup",
+                "c++": "cpp",
+                "c#": "csharp",
+                "ps1": "powershell",
+                "console": "shell-session",
+            }
+            lang = aliases.get(lang, lang)
+
+            # Safe fallback: Reflex CodeBlock rejects unknown languages.
+            # Use `markdown` as a neutral, supported default.
+            if not lang:
+                lang = "markdown"
 
             if inline:
                 return rx.el.code(
@@ -88,11 +123,18 @@ def preview_panel() -> rx.Component:
 
             props = {
                 "language": lang,
-                "show_line_numbers": True,
+                "wrap_long_lines": wrap_long,
             }
-            if starting_line_number is not None:
-                props["starting_line_number"] = starting_line_number
-            return rx.code_block(code_text, **props)
+            if show_line_numbers:
+                props["show_line_numbers"] = True
+                props["starting_line_number"] = starting_line_number or 1
+
+            try:
+                return rx.code_block(code_text, **props)
+            except TypeError:
+                # Unknown language: fall back without crashing.
+                props["language"] = "markdown"
+                return rx.code_block(code_text, **props)
 
         # Fallback (should be rare): try rendering as plain inline code.
         return rx.el.code(
