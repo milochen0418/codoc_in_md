@@ -1,3 +1,4 @@
 
 reflex==0.8.24
 reflex-monaco
+pygments>=2.17

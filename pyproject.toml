@@ -9,6 +9,7 @@ packages = [{include = "codoc_in_md"}]
 python = "~3.11"
 reflex = "0.8.24.post1"
 reflex-monaco = "*"
+pygments = ">=2.17"
 
 [build-system]
 requires = ["poetry-core"]

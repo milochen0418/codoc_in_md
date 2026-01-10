@@ -66,7 +66,7 @@ _DIRECTIVE_RE = re.compile(
 )
 
 _FENCED_BLOCK_RE = re.compile(
-    r"```(?P<lang>[A-Za-z0-9_-]+)?[ \t]*\r?\n(?P<body>.*?)(?:\r?\n)```",
+    r"```(?P<info>[^\n]*)\r?\n(?P<body>.*?)(?:\r?\n)```",
     re.DOTALL,
 )
 
@@ -285,11 +285,12 @@ _CODE_FENCE_RE = re.compile(
 def apply_hackmd_code_fence_options(markdown_text: str) -> str:
     """Apply HackMD-like code fence options.
 
-    Supports:
-    - ```lang=101  : show line numbers starting from 101
-    - ```lang=     : show line numbers starting from 1
-    - ```lang=+    : continue line numbers from previous code block
-    - ```lang!     : wrap long lines in code block
+    Supports (HackMD-style), rewritten into a markdown-parser-friendly first token:
+    - ```lang=101  -> ```lang-linenos-101
+    - ```lang=     -> ```lang-linenos-1
+    - ```lang=+    -> ```lang-linenos-<previous_end+1>
+    - ```lang!     -> ```lang-wrap
+    - ```!         -> ```markdown-wrap
 
     This function rewrites the fence info string only; it does not modify code content.
     """
@@ -324,6 +325,10 @@ def apply_hackmd_code_fence_options(markdown_text: str) -> str:
             wrap = True
             token = token[:-1]
 
+        # Handle `!` with no language by forcing a safe base language.
+        if wrap and not token:
+            token = "markdown"
+
         if "=" in token:
             lang, _, spec = token.partition("=")
             spec = spec.strip()
@@ -341,21 +346,166 @@ def apply_hackmd_code_fence_options(markdown_text: str) -> str:
             if start is not None:
                 cnt = _line_count(body)
                 last_end_line = start + max(cnt - 1, 0)
-                token = f"{lang}={start}"
+                # Encode options into a parser-friendly token.
+                base = (lang or "markdown")
+                token = f"{base}-linenos-{start}"
             else:
                 # Unknown spec: keep original token.
                 token = parts[0]
 
-        if wrap and not token.endswith("!"):
-            token = token + "!"
+        if wrap and token and not token.endswith("-wrap"):
+            token = token + "-wrap"
 
-        new_info = token + (" " + rest if rest else "")
+        new_info = (token + (" " + rest if rest else "")).rstrip()
         # Preserve original leading/trailing spaces on the info line.
         prefix = info[: len(info) - len(info.lstrip(" "))]
         suffix = info[len(info.rstrip(" ")) :]
         return f"```{prefix}{new_info}{suffix}\n{body}\n```"
 
     return _CODE_FENCE_RE.sub(_rewrite, text)
+
+
+def apply_hackmd_code_blocks_with_lines(markdown_text: str) -> str:
+    """Render fenced code blocks into HTML with syntax highlighting and optional line numbers.
+
+    This is the pragmatic way to support HackMD-style options in Reflex today:
+    - `=`, `=101`, `=+` (already normalized by `apply_hackmd_code_fence_options`) -> line numbers
+    - `!` (normalized to `-wrap`) -> wrap long lines
+
+    Output is raw HTML that relies on `rehypeRaw` (already enabled) to render.
+    """
+
+    text = markdown_text or ""
+
+    try:
+        from pygments import highlight  # type: ignore
+        from pygments.formatters.html import HtmlFormatter  # type: ignore
+        from pygments.lexers import get_lexer_by_name  # type: ignore
+        from pygments.lexers.special import TextLexer  # type: ignore
+    except Exception:
+        # If pygments isn't installed, keep the markdown as-is.
+        return text
+
+    aliases = {
+        "js": "javascript",
+        "ts": "typescript",
+        "py": "python",
+        "sh": "bash",
+        "shell": "bash",
+        "zsh": "bash",
+        "yml": "yaml",
+        "md": "markdown",
+        "html": "html",
+        "xml": "xml",
+        "c++": "cpp",
+        "c#": "csharp",
+        "ps1": "powershell",
+        "console": "text",
+    }
+
+    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})```(?P<info>.*?)(?:\r?\n)?$")
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+
+    def _parse_info(info: str) -> tuple[str, bool, bool, int]:
+        """Return (language, wrap, show_linenos, linenostart)."""
+
+        stripped = (info or "").strip()
+        if not stripped:
+            return ("text", False, False, 1)
+
+        token = stripped.split(None, 1)[0]
+        wrap = False
+        if token.endswith("-wrap"):
+            wrap = True
+            token = token[: -len("-wrap")]
+
+        show_linenos = False
+        linenostart = 1
+        m_ln = re.match(r"^(?P<base>.+?)-linenos-(?P<start>\d+)$", token, flags=re.IGNORECASE)
+        if m_ln:
+            show_linenos = True
+            linenostart = int(m_ln.group("start"))
+            token = m_ln.group("base")
+
+        lang = aliases.get(token.strip().lower(), token.strip().lower())
+        if not lang:
+            lang = "text"
+
+        return (lang, wrap, show_linenos, linenostart)
+
+    def _render_block(info: str, code: str) -> str:
+        lang, wrap, show_linenos, linenostart = _parse_info(info)
+
+        try:
+            lexer = get_lexer_by_name(lang)
+        except Exception:
+            lexer = TextLexer()
+
+        formatter = HtmlFormatter(
+            linenos="table" if show_linenos else False,
+            linenostart=linenostart,
+            noclasses=True,
+        )
+
+        highlighted = highlight(code, lexer, formatter)
+        # Ensure the block scrolls horizontally by default.
+        # If wrap is requested, allow wrapping inside <pre>.
+        if wrap:
+            # Add `white-space: pre-wrap` into the first <pre ...> style.
+            highlighted = re.sub(
+                r"(<pre\b[^>]*style=\")",
+                r"\1white-space: pre-wrap; word-break: break-word; ",
+                highlighted,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+            # If there was no inline style attribute, add one.
+            highlighted = re.sub(
+                r"(<pre\b(?![^>]*style=))",
+                r"\1 style=\"white-space: pre-wrap; word-break: break-word;\"",
+                highlighted,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+
+        return (
+            "<div style=\"margin-top: 1em; margin-bottom: 1em; overflow-x: auto;\">"
+            + highlighted
+            + "</div>"
+        )
+
+    while i < len(lines):
+        m_open = fence_open_re.match(lines[i])
+        if not m_open:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        indent = m_open.group("indent")
+        info = m_open.group("info") or ""
+        j = i + 1
+        body_lines: list[str] = []
+
+        fence_close_re = re.compile(rf"^{re.escape(indent)}```\s*(?:\r?\n)?$")
+        while j < len(lines) and not fence_close_re.match(lines[j]):
+            body_lines.append(lines[j])
+            j += 1
+
+        # No closing fence: treat as normal text.
+        if j >= len(lines):
+            out.append(lines[i])
+            out.extend(body_lines)
+            break
+
+        code = "".join(body_lines)
+        code = code.rstrip("\r\n")
+        out.append(_render_block(info, code) + "\n")
+        i = j + 1
+
+    return "".join(out)
 
 
 def _fetch_oembed_html(*, endpoint: str, target_url: str) -> str | None:
@@ -1141,7 +1291,14 @@ def apply_hackmd_embeds(markdown_text: str, *, extensions: dict[str, EmbedExtens
         out_parts.append(_replace_directives(text[last : match.start()]))
 
         raw = match.group(0)
-        lang = (match.group("lang") or "").strip().lower()
+        info = (match.group("info") or "").strip()
+        token = (info.split(None, 1)[0] if info else "").strip()
+        # HackMD-style options live on the first token: lang=101, lang=+, lang!
+        if token.endswith("!"):
+            token = token[:-1]
+        if "=" in token:
+            token = token.split("=", 1)[0]
+        lang = token.strip().lower()
         body = match.group("body") or ""
         block_ext = FENCED_BLOCK_EXTENSIONS.get(lang)
         if block_ext:

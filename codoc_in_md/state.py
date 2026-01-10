@@ -6,13 +6,19 @@ import uuid
 import logging
 from typing import TypedDict, Optional
 
-from .embeds import apply_hackmd_embeds, apply_hackmd_typography, apply_hackmd_code_fence_options
+from .embeds import (
+    apply_hackmd_code_blocks_with_lines,
+    apply_hackmd_code_fence_options,
+    apply_hackmd_embeds,
+    apply_hackmd_typography,
+)
 
 
 def _render_markdown_source(source: str) -> str:
     normalized = apply_hackmd_code_fence_options(source)
     normalized = apply_hackmd_typography(normalized)
-    return apply_hackmd_embeds(normalized)
+    normalized = apply_hackmd_embeds(normalized)
+    return apply_hackmd_code_blocks_with_lines(normalized)
 
 
 class Document(TypedDict):
