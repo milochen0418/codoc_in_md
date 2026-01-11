@@ -118,36 +118,77 @@ def preview_panel() -> rx.Component:
                 ),
             },
         ),
-        class_name="h-full w-full p-8 overflow-auto bg-white",
+                id="preview-pane",
+                class_name="h-full w-full p-8 overflow-auto bg-white",
     )
+
+
+def split_divider() -> rx.Component:
+        """The draggable split divider with a scroll-lock toggle."""
+
+        lock_icon = rx.cond(
+                EditorState.is_scroll_locked,
+                rx.icon("lock", class_name="h-4 w-4"),
+        rx.icon("lock_open", class_name="h-4 w-4"),
+        )
+
+        return rx.el.div(
+                rx.el.button(
+                        lock_icon,
+                        on_click=EditorState.toggle_scroll_lock,
+                        title=rx.cond(
+                                EditorState.is_scroll_locked,
+                                "Scroll locked (preview follows editor)",
+                                "Scroll unlocked (scroll independently)",
+                        ),
+                        class_name="p-1 rounded hover:bg-gray-100 text-gray-600",
+                ),
+                id="split-divider",
+                class_name="h-full w-3 bg-gray-200 hover:bg-gray-300 cursor-col-resize flex items-center justify-center select-none",
+        )
+
+
+def split_interactions_script() -> rx.Component:
+        """Deprecated: client interactions are loaded via assets/codoc_split.js."""
+
+        return rx.fragment()
 
 
 def content_area() -> rx.Component:
     """The main content area handling editor, preview, and split views."""
     return rx.el.div(
         rx.cond(
-            EditorState.view_mode != "preview",
+            EditorState.view_mode == "split",
             rx.el.div(
-                editor_panel(),
-                class_name=rx.cond(
-                    EditorState.view_mode == "split",
-                    "w-1/2 h-full border-r border-gray-200",
-                    "w-full h-full",
+                rx.el.div(
+                    editor_panel(),
+                    id="editor-pane",
+                    class_name="h-full w-full overflow-hidden min-h-0",
                 ),
+                split_divider(),
+                rx.el.div(preview_panel(), class_name="h-full w-full bg-gray-50 min-h-0"),
+                # data_locked is read by the injected JS (supports both data-locked and data_locked).
+                id="codoc-split",
+                data_locked=EditorState.is_scroll_locked,
+                style={"gridTemplateColumns": "var(--codoc-split-left, 50%) 12px 1fr"},
+                class_name="grid flex-1 overflow-hidden h-full w-full relative min-h-0",
+            ),
+            rx.el.div(
+                rx.cond(
+                    EditorState.view_mode != "preview",
+                    rx.el.div(editor_panel(), id="editor-pane", class_name="w-full h-full"),
+                ),
+                rx.cond(
+                    EditorState.view_mode != "editor",
+                    rx.el.div(
+                        preview_panel(),
+                        class_name="w-full h-full bg-gray-50 mx-auto max-w-4xl border-l border-gray-100 shadow-sm",
+                    ),
+                ),
+                class_name="flex flex-1 overflow-hidden h-full w-full relative min-h-0",
             ),
         ),
-        rx.cond(
-            EditorState.view_mode != "editor",
-            rx.el.div(
-                preview_panel(),
-                class_name=rx.cond(
-                    EditorState.view_mode == "split",
-                    "w-1/2 h-full bg-gray-50",
-                    "w-full h-full bg-gray-50 mx-auto max-w-4xl border-l border-gray-100 shadow-sm",
-                ),
-            ),
-        ),
-        class_name="flex flex-1 overflow-hidden h-full w-full relative",
+        class_name="flex flex-1 overflow-hidden h-full w-full relative min-h-0",
     )
 
 
@@ -157,7 +198,7 @@ def index() -> rx.Component:
         rx.el.div(
             header(),
             rx.el.div(
-                sidebar(), content_area(), class_name="flex flex-1 overflow-hidden"
+                sidebar(), content_area(), class_name="flex flex-1 overflow-hidden min-h-0"
             ),
             class_name="flex flex-col h-screen w-full bg-white",
         ),
@@ -168,6 +209,7 @@ def index() -> rx.Component:
 app = rx.App(
     theme=rx.theme(appearance="light"),
     head_components=[
+        rx.el.script(src="/codoc_split.js", defer=True),
         rx.el.link(rel="preconnect", href="https://fonts.googleapis.com"),
         rx.el.link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         rx.el.link(

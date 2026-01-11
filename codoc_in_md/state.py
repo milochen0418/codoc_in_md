@@ -89,6 +89,10 @@ class EditorState(rx.State):
     last_version: int = 0
     view_mode: str = "split"
 
+    # Split-view behavior.
+    # When locked, the preview scroll follows the editor scroll (HackMD-like).
+    is_scroll_locked: bool = True
+
     # Monaco editor should be treated as uncontrolled for a stable cursor.
     # We keep an initial seed value that only changes when the document is (re)loaded
     # or when we intentionally refresh the editor (e.g., remote overwrite).
@@ -260,6 +264,11 @@ class EditorState(rx.State):
     def set_view_mode(self, mode: str):
         """Sets the current view mode (editor, split, or preview)."""
         self.view_mode = mode
+
+    @rx.event
+    def toggle_scroll_lock(self):
+        """Toggles whether preview scroll follows editor scroll in split view."""
+        self.is_scroll_locked = not self.is_scroll_locked
 
     @rx.var
     def user_count(self) -> int:
