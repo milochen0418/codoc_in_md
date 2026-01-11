@@ -12,6 +12,7 @@ from .embeds import (
     apply_hackmd_blockquote_labels,
     apply_hackmd_admonitions,
     apply_hackmd_embeds,
+    apply_hackmd_emojis,
     apply_hackmd_typography,
 )
 
@@ -19,6 +20,7 @@ from .embeds import (
 def _render_markdown_source(source: str) -> str:
     normalized = apply_hackmd_code_fence_options(source)
     normalized = apply_hackmd_typography(normalized)
+    normalized = apply_hackmd_emojis(normalized)
     normalized = apply_hackmd_embeds(normalized)
     normalized = apply_hackmd_admonitions(normalized)
     normalized = apply_hackmd_blockquote_labels(normalized)

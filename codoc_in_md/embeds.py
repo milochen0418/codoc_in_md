@@ -12,6 +12,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 import base64
 import binascii
+import functools
+import gzip
 import ipaddress
 import html
 import os
@@ -69,7 +71,9 @@ _ADMONITION_START_RE = re.compile(r"^\s*:::(?P<kind>[a-zA-Z0-9_-]+)(?P<rest>.*)$
 _ADMONITION_END_RE = re.compile(r"^\s*:::\s*$")
 _ADMONITION_ATTRS_RE = re.compile(r"^\s*\{(?P<attrs>[^}]*)\}\s*(?P<title>.*)$")
 
-_EMOJI_SHORTCODES: dict[str, str] = {
+_EMOJI_SHORTCODES_OVERRIDES: dict[str, str] = {
+    # Keep a tiny override map for edge cases / customizations.
+    # Most shortcodes should be handled by the `emoji` package.
     ":tada:": "🎉",
     ":mega:": "📣",
     ":zap:": "⚡",
@@ -78,13 +82,244 @@ _EMOJI_SHORTCODES: dict[str, str] = {
 }
 
 
+_EMOJIFY_JS_VERSION = "2.1.0"
+_EMOJIFY_CDN_BASIC = (
+    f"https://cdn.jsdelivr.net/npm/@hackmd/emojify.js@{_EMOJIFY_JS_VERSION}"
+    "/dist/images/basic"
+)
+
+# Gzip(base64) of the newline-separated list of emojify.js basic emoji image names.
+# Generated from: @hackmd/emojify.js@2.1.0/dist/images/basic/*.png
+_EMOJIFY_BASIC_NAMES_B64_GZ = """
+H4sIAGe7Y2kC/5Vc7ZLspq7971e5NVXJJDnJeRoXtmmb3bZx+Oienqe/a0my2z0z98etPQ2SjEEIEJLA+39+b95+b
+37/7bfm9/c//mz+6dw8N65xHf56/obG                                                          9b3fSuOGJeQc4tqW0F99yaDUGXSfgpvbktxyd4/GhbTNbvUH0LqUwi2s45My+M2lUhMKzS4tbT/H/grYL11Ao3Pwa
++OWrqJwjzLLNsUEntYeObLRz5IKnB5M                                                          a8iTB6sr+Nm2GS/9W10KFUym4JmmeG8711/vLg2GDrF2M7iJ9/WVUrcDPz26r21eRDxCuMR0qmvybkAfz2/spKO22
+V/KDsa7T98JKYzTTvkGt1OMVyMcddbt                                                          3CSwM4t1215bUcKp5qyyv4fsD0Ksa/HpTGdhDDrGo/gBrCYKPZe4mtTLNHs8b/MUUbws+MWlzY+li2DlFns3xKZrO
+tc9JGm7WAoGSeB+wnRS0N7gMDGJK1LM                                                          uhUttcn1/1ZfWrcOaKfy/T5KuXF0o0c/XFiIoVDxbZcg/YazOUo1yAua/WjvoUyt4t/I/eSlRnABft2Kf8xG/gjwW
+UIpSgRQhxmIzM/gvK4r+5a9LCAAWCEG                                                          smyZJCmVUgB/EGDnXT9pu3UBu/PsSEuSDJAzhiqTd0i4856/JElmKuLzY1hXobIhJFPcWkMgtAar6dHPIYODcPVMw
+hqQzTOq790GME7uE821OYxoKmA+IynT                                                          gJXczRiHtg+YCv4F4dRvE8TP0kLHVKdIBP4Vr2RJYKxuDE3mWtyr4Gxst4hB1eUiC65AhawjABHHzXO2Qad0bq9o8
+UOoi07u1/r2J2faGjqDdOH8v5v78tpr                                                          eavkh9d+YE+RtsOE5VieaZQiFhFGYY7r8DZBPfrhbXHrK+EejZRzXJjfL1h2ACqqpUYQqBcmAOxDUVkmkho5A+MCk
+UhpJItLT6AtrsuCSbow4QuVyw35nT9Z                                                          dqIgiM0qiLzJ2gJO7Y5VRFmNc7yh8xHzJ7mAx7oQkebydvF+kLIpDIf0wyw4JoorGDrqJuD+0mM1AYp9H+dA4OrXv
+XsVddQwi36Fnsgl1b4EclPnjgkUUmH7                                                          7SXFtbxQMtoGAbsSlwi2CPx0HGourRTAQhI1IqT8jcYFfJkfTe/6gvd7h8WFmeDXAfLuOQcWDAREJgg73LsFmxZTb
+GSaafcvs8NAgbJpMWx4rGIdZi8ZG8Ea                                                          HzBbIqtbI+lbKJh4sjsDSQFLcW16aRxr+RJmTo0PxcI6+DPYDtiNB6oR0GLNfsbGkjKrxfgWZPJ7b1g55uCamS2bG
+7Gpq+6TdF8M95XbYMYi8etwflS31wfQ                                                          rT6xJ7MbifqMKeAx7kSSbNMCYHuwyQ40l7WyQZocK/N50BSVtn1COZHbFLalQj/DQsBscdwAKA3ow0xrhTUn6MHFC
+TtssaYecg+rXzAgUGsVT6A0ARdR54lb                                                          345krw8ypA0qRnKG9mSycbgwhllVgc1JkMJ61eWAZ+zZHDYuR3DPjfV3y37b8z92aH/y+0F53/ODsgP25Hjwh2U7/
+qdlO/6XZTv+H8t2/G/Ldvwfy3b8v5Yp                                                          njGWolIM5iMd+at/7MRjawNepfMwoy6upxQr9E6PQaWC4l5eHFQBgChDHi8XDhSywDIz9qi7l5JYUrRDAS0cl7hsy
+eedstXCIYnrBYs1yE4vGKwabKoCYs4L                                                          MCZXaNPgzdy8aJEz0t5jumqVJcW5va6xk+I3v8JQ7T2VeCKn8Ros4wyIkQ1v/D3U4tJVGiu2farTGYuKKM1VzVR6q
+uKUcoXJDfDOH0Y7wS7vsYZCocIfCOce                                                          s7ZdqIn7JIb5nqPvai6pDKBI4xDYVoqolaayrB+uyEBrOj9xrNAnliGAQdA723jwJ3oX1etIpkcushGyndpjzCkvG
+KO6TUDt3okGMFwT9SFFRm0C7IF5QylB                                                          H0OYj9Z/QIWsozxkW1DA0lPkcQEXtbTxAv3KmQDjhtUMMAFh1l7XcCEiKlSzzHyMSLHPYR3vq3GghAdq3gG6ohn41
+4ehxmr6YaCxpW7KQvnqEENr+jn0tMQx                                                          h56rfYAqY4WStSHPVP3ArthV2mNODsEtUaxXKBEVjYP+5JYjW5I9B3chQ7HQ+MA8PSMtm/c3oX5+PjTVMRhiu6KqO
+RRpKo78vSPB2kuSZabbhMU0xEjSdysG                                                          tHHi4huwh1PMm5e6kxsxvTSz5rjikGIFQpYw4mV/Ax5leK1MxAxGZQn2mW4WgEwfDxWW9lCXTbbH4TY0HqYP1r93M
+LQa2sH4kQdMZsEprgsQtyPYRIHlHc0B                                                          T8aRP3qZpfGy6PzTlKO+UgOssHp5ABvmCjqME9SWr43/5Xu8BOcCRl/fbjMsDWDbJDXOl8YrlxhgDw0wR+wHO2BjK
+lYSJpmvKUoCKWKvQhPs2I5vMXMmX6R3                                                          GIUR027VyYclAN0gegnwNkcxc+hOEjVdN3MA/MPz9xbWt7x5309vXe26WYj7XAeYGw5Iu7l5UegWl0DLVjH1feIdR
+huslnIiqmLAMzAoS940fdjyqRQtnZZF                                                          oIYqPJ3TE/CMmQW7CAv6ScY0j3QqnhQs4xaMduLsukAFfXq4QTJS9U+Ma/H97fODKLZX+xSAqiNxMjOa/MZugfmxc
+FPBEiJ1q2svz7H6H8iDpLAkV7gx7gJ4                                                          CTNJGMo9HHBxH80FU/JSZ+SY/hfMmNm/0YPOTwxKMa6uHoTzjvNmO87xCHuswQN4QxlY2DshkrkdM1a/VHBxaTlh8
+CounPtP0liFc0V+VZpkhiye2jj0O64T                                                          9kv9W6AzvSPQAP1e8CiSe2yVZwFkmVkHVupA48vQQtf4+RRdntY4x/H5fsulaKCNiyIjN+UdWdzRE3VwDb7R3E7Ho
+084R/LSqhzDFs3tHQbqLAjqDh7mB0xL                                                          GDatKLDnvirGdu86WJJFkQtsFdYT5gXeB9RUVnhLkcqFoyWNI2n9ChdeYcqUJRMmExQY5iR162wUuoxFVhiUwneSL
+VeqXfEOmbTilxDiKsC4eOF6f05uOY+w                                                          17+53vLB8p1+sXy0PFg+W75YHi3/1/Jkeba8WF4tv1v+Yfmn5p2zvLPc+OmMn8746YyfbrLc+Op+WW58davlxl9nf
+HXGV2d8dTfLja/uYbnx1RtfvcmpN756                                                          46c3fnrjpzd+sMdpbvLqja/e+OqNr36z3PjrTU698dUbX73Jqzf+euNvMPkM1v/B2h2svcHaGay8t354e88b/54W0
+mqd88aMN2F5E5Y35i7WyYs1erHGLtbY                                                          xd4fTXijDepo9Y/W+GiNjya80eodTWij1Tua0EabZONev/E1Gl+jCWs0IU0mjMnqmayeyd6f7P3J3g8mnGB8BuMzG
+D/B6glWT7D+BuMrWL3B5Bas/l9Wzy97                                                          /5e998sG/2rPryaPq8njavK42ntXa/e6v2ftXa3fV+v31QZ7NvnPJv/Z+jdbvbPJZ7Z6ZuN7Nr5nk8tsk3G2+herd
+7H6FpPXYv1YrB+L9WOxdhaT42L9Waw/                                                          i8ljsX4txs9i/CzGz2L8LMbPYv1ebHEsO3/W/9X4XI2v1RbtavytJofV+FqNj9X4WI2P1dpdrd5o/G9W/2b1b1b/Z
+vVv1v/N+r9ZO5v1e7P6N+vnZv3crF+b                                                          9edfaycZf8nKJ+MrWfls5bKNd+73PJbn6s57blxn4zYbt9mkkm11Z+M+G/fZep+tF9m4ytabbNxl60220co2Stl6l
+U2axbguxm0x/orxVYyvYvwU46cYP8X4                                                          KcZPMX6K8VOMj2J8FJNWsfartV+tvWr1VauvWn+q8V3tvZu9dzO+9y31ZvXcTI43q+dmo3WH5WFV3i1/2KufVuWns
+fCprEqpPM3i1lxmeBLt4GGLkx4kEHWB                                                          F7I92iHIYMmJEiwJc9bpw18YFqZtPQsxuyoWD7xF/KgvY9RTCwIbTP6Cd2CXiOGg/jXQUmGtW7iDcZXCOC+AJImYx
+vQUblL1h1klgGkLqaGywYnm8d+F7g6c                                                          Otrv3AYEylMK1AESEbwkMsfQg1j91c9b5cPKIKvYQjt0NoHAYIJPW9PajGx0AKfYfka6laNf+ONJiBqL4wRXrBnDR
+ROLv4whucvFa4VA5kYcKgk+BKjMcY7d                                                          7s7AOYLzvuZGgt/IIhqnPTgytDVG2KpMII8xpsBo2JjcxoLi9OmJpcISUFPQ+BA4uxm2GWAJkBzeoRD+rT4bFhbXU
+06ABF3XHVt3t/zpb+nhjPhuwPTsgg7l                                                          D8XpMKsfJa5C5onEWAPd6BELhCcVPXyZiYe2iXY9oOXIpI2Np3wn/M5wz0QKXe9GouXiSEqDGqkmuoRhoFGtIarWg
+lJStINZqjlmLIE80eIFxADkxPAO3Fl4                                                          EoMdMgomq0FReKfbhM5ngqldY+tv2OVV8JJihfUxqbCVIFJ4goyCKdr5HdrqDK0qoBS9PfRksZVzFyUwCC+H6eKXG
+E2CNWfKaazPL1vzXx62Ma2O0SorhSle                                                          87m2pc4lbHDP9J0PI2/zsxhcvwkLbmKYK24yMH6GQ6yjcp9C8ToEoKeumUIXcg/VOEEptZ2EOVcGJgQXDwpe0xSRY
+oZT1GgOvqJAPNTUkwdJecLL2YrVKMcb                                                          AOAIeVFsABnSQiY1lkzdBIU4Qd/IsnxCLRWfKjfOKAbqmtdwXTZcujTyrBU9r+N4BK4mVZKh5WpuH7FqhENEBKcWA
+vBwfAh9cwk3hrX4JF8ZWARkhVHd4COX                                                          /dS64eagNGH/Us+FlefPJbkHwD4uErLYQ0thhb61MWZAcT8UPtMzut6z6BoZC24Y6UopyqF1kPndwAQNn+7qHq5la
+MxDL/5iICye0M1ZynMZi1Yd+Bi7OZye                                                          oyd46qnzfsUHf7IQkIssGti0vyBSCe5dnYNfxyWJn56BAOjdpnE4gwtG4RoYGWok6M1E3tZcqj9gDUPJUtxpumh3L
+ENHH7Gfa7iHS4K6anQLk7SVfW3jWVFz                                                          hb4Gh/GKtlMzuw6zbBeMakk9Y9Wj8BPFQrZGgqKAkjoRv/rt3yinPYvnEHaiBbiO1FMNtlLuJzPXJRjzl8IQj0xUO
+vBylj5XuQChiB5cawhSCBoWbC0sSJIe                                                          yul9EA3SccuZ/UIGfeRv4xjNHnOwzTPPCps5dMk1Ynow4DYrKLvLAbV6xMOTL0l4hQG7XOolXDiHPXZsqJ7MAfiU1
+niX43mChNcx1cEQY3hb3Bo5JGD9nO4U                                                          LkD0zTEMJctUdYOAPOkV8v2skp5XbiRwIxFha+N40GMVxhfKbt98LbmBVrrEU3a1paRrS7NgT8LP7thIAGpx06+4k
+hxmnspabrP4QNWUoGxfKNiUjPgMIn4J                                                          If6fAcRn+PBL8PAcOvwpcHgOG34LGp5ChqeA4Wu48Idg4SlU+FOg8EuY8BwkfAkRvgQIv4cHj+DgKTR4Cgw+w4LPo
+OBLSPAcEKSVg9+b3JsZFcR04Pp7E5tD                                                          Kffnw8eeHzDs7iKhxL2QxJXdvBz4btsSGWHJVW5tdEJfCTKIJBTGv992k+tMW7D9addAo8W6Awc3gjwfwSbdWxb1+
+bb3+NDdRKhTjyczLGS2dZfjkyy0c9+/                                                          9v+Fl2/8fOdpsfV2Frr5MG+HrXcm3qHAEyeTCmyLtezv8WRgf08JMlZvciNG8LoeoofXoTaAYjUdosn3sBzDBQNqe
+6kTftzB6B1C5EMMWWfy4hp+63g77A0P                                                          8xtPFB9H+XgW3YF9oRyyeaI/lDgVS5g0++iprc1S0JB6X0YsZXkGzYyJbgV5YrrD0HddheygN9uMjRM67wabrJyeY
+x3DbNxiDmIcGxW2vFsebeI9IiOV+uEH                                                          GRyzuKqDM4BFeKI9BZb1EuHC3Xfegqe5JXvD4nhALscuC9Ug77/Avm4rNnOYQiBmFrIVAFucBzwdjR8No/OeGM857
+Y7h4keHZCbr2PqQrNi+7T4eJgVvEPLC                                                          KXZfPGICcwtWnOR8J5klBuM44fWAnVttLQFzT+vtxXdp6DY+Wt6RpfPJi0fM4axDXcaOJwdSAQ8FQaCprGdeurMIQ
+a1wsWGFQA8IAG0rzY7CUXZpsToWeOxw                                                          K9TyWmKGv8isHNcWl8iDr/a4IkNClBeKgehOFNVPTHrAZdpe6q/Q7Cv2ANrntcOD1DuYH8eLpJA/I2Sv6TuyW/CtX
+ZNa4sOhejp9MIjAVc00v5BNOr+qXro5                                                          rMqdsILXAwHrVOsVpBVNMhBCaOENIe5bqxjRKLjRv8J+mr3cchVBrvDaSmA+Om6cdnVvUDtNXbLVp6N0LQw7GHLnT
+w2/HTjZeyBlMY8arCm59fZ0tXPDGdhg                                                          65fLnMxFpJiM9FHXgk1tB3QPAzbyghithdNcykrgKSeAzcOFkLuMQs+L3lRZI9Vm4Qi1ok1ByWy9eIlG7ICd4ZtDf
+PN6LCyPUV+1uyZxLk1s4nsDZwQLBTYG                                                          bw1wIMgnTY4NYxnpdNnpd8So8GZAg7bQimhWtib3Hnnvh9NbztRavXGusD0FZCWPG8cQeNw9KdhHUSXypHHpHYiaI
+XJ/8qAV9xEarmU5eRYhCHQ+3hOCqtLn                                                          +TTAKdR+YgPqDOjLCquLgtU4xYH2n9j6eO3w/+IdzH80G1wzarGN95rN3q+bonpWX6HqiaaGpoTeGiCUeQO8RBgEk
+zxbeQSYCQxOp91hkTec7xx+7kitm+ns                                                          nAINpB4K4oy0cqtz490CuRuQJ6kr5w0da+2SFAj31uKHcodkHxoiE1PMF3kELj32ndmyd+ZjZQvQujRVwS71u4xlk
+ndS5n0JeQIF/NzEDB+ixTvV7trJh51l                                                          +Pct7PngvIsZ9bg2/krgRd2WttgLmYGlDA4uL1QzTWwcZK+QoBh2OfxG/t6ZtLL8YCmjLagBjQ5u2CY4kuHz0zV6P
+BwvvJqm8hdnRj4EUFDu/CuonojCdTuA                                                          Fm09p/4G5cFW6GXB3ZKbaucbKoSdXBRVOv2YV51BrERklQMcsU6hm2Y/EsaC3jtPN37jXGeC6dNRVED8uGLLt6UMt
+Hxy6DCD2LhkOQsgbcm9jK0mmgS6qoBQ                                                          aNgbNk6eul+F4nAGmAkisuYIlSbXdaFY9o689xqK0iCUyMRA2fNE+4IyhKjpfqNbENfr5kANl7hybXOzahTGCsdgy
+w1kdZQJ8nq15W9yL9Zus3QSnbmoMjTa                                                          V/h8RQdmEw1i/1IgN2YB768u/HnyiK5765N8CpA01wAHBiMwKMva/Ow+NNeLZ4mR80E+Iuk69t9vXmrb1OTi23RMs
+XISl+krsy8GUes/ipdLmSgZ59sRxQHf                                                          HkYO6FNgTAt6stmb42RkomsxaTjO8WaxIrwOyRKY8y+hEguMSLsWDKGp3qTYRbvGmKLcnuS1IV5c3drnFi003oOSe
+2LNfrOI30JNnhFH2EhH0Aadt1KcT0h4                                                          aTxFNZ9bPb5JXBTtPl0T715RihV/Y/doj3MYeiisyhwVy6l091vWmWHu7PA3YsLrN09ZAgioMDMezkAoDGBm99CzM
+CwwpDCwsUb8E2ppdK+rPAv5EjAy2fG+                                                          WiTwYfZt7uXkSvVb7ifec9UMvDDaThQuI5ZTs9uNNMI2rjsFyKLGRTUTrQAQYm1ofiHpqVjP12AyI6l84o84PeBB/
+JwMhx9KNPsUeIPz+12v4wKb7tLcQMDL                                                          xM9/sE/BC8FSkwv2oC2cBwSSpJj0LSddxmayMSWPEy8EMVtLlPMqyoWKWAaGKRPOp+HEzZe7fOLoIBGHEvMZRv2BF
+ZlxDxLulJ8eiYmPirTqlR6ZtVQ6ZJ8T                                                          keo5C4X2Fu/dj+xt+ODvuAMpUdd8Dfx5geDWYmTf3k/wHyf4zxP81wn+D+BKcTAV609Mmk4Mzzxz+swQmoyQAa3rY
+WMtcdAjFSE/mNHRoaMhGJcI7I19y7aO                                                          7uQ9tmtULN/F8VgHiJxhHV8gKvoSqFXSl0CtEqkA9w99fiDp7sq2vaY6aQk9LDsoXw7PTrFokZLow69T0grJMC+Bc
+4+pVamGeqYDw5SLevX+8ymFFfO459cI                                                          Q3v4Y0qUrYag+Egcb8DYaq76Frdby4VbMNMSb3Ls8OsZmkN2xYDSkcmRADd0aEZ0MKw3J5VuyDKzcWI0ilC6UlSap
+x3IBjxD9hLFfa5pi+lKvi+VLx/g7DFt                                                          +7iP6KDqbgvKTBC3wHcE6ZHtH+dgrQ87jX6L4eifBnT0iyYxZfOud/6tcPuxZviZGfPLhcvN+czvIVWXyYJC8iYR2
+KvA75LaqtBb+krBy4O7aZ1JXtalgLyK                                                          UTeHzqeCSUUrlF9VwIGRqC0IGBc4UHfq2Yb36jUgX0XAvGbfyX3FXCrNBwwl1ulY/TfCywnKt4d3+3aFh8EMu8LaO
+cU3QLlc9COBoh93wS+AHYcVOOzT7Uk4                                                          2Tuk6rp64k9/GJheWWhO9/TV/di/xrH8uGos05yF0kVeg1ZkKp5DfEYY9LMRSVveSc8G21q+e8/74WK9SqiPdem+g
+XyF9yoSfHCx+qa8Jf/RqOHLzTJkzqHB                                                          7lbKnl1cH5EMDsnVU660lotbXeeKU2etiCVCnVWww2IOicuJAcePt80p6APit5Y+0NcmSUNL2nYjnyw9Vf/5AnOZb
+BhFvMDS64bKtc7Zsy+jMgljTM24bTU2                                                          U6a6dFnUn4LwIgCIFSgjKV0Xt1C/DEdG11TSd2SLFsTCKCHtoZWyNAWeP0vH6yNi7nHs4axzHGza8qM8/HgnvfBwe
+4h7blNIbGoVepITDOb0WMzMKsoV03dm                                                          aFPUeeU5O+1tmnD0Z850XU6Fnyiu8qAu29TYjszYQeFSeEgmIaYh8cjrQOWCrSoCpMvGLqpdUCod7wIZ0prUg+tSE
++MbyHjgWm5NudP4HtRvOx3Woeg98rcb                                                          yQQX/zWuSyq8qG/0+tf73+9I//ztH6R/df9p6n/++O1vpH+TgvS/SP0/vzX179/ff0f61x9/IP3vP4Td366p1+b4m
+msHKL9RjNknab+Vv9pqq6tb5JMrmTJ0                                                          j+oqXyzqRKirTA1MqrrxOxj90l4f5ebW7Cczx5cqr0N8m1CIp5Mau4gDSvKofY8iKsJbQAD5dQqyNMYGHge/pmTOY
+eUcuuVmj+bfnZ5ovnxfZcSRrgjMTKOl                                                          VV/AoOln342qZ3GLsZIuFzdHw+SYQkANPd9hXjIRA1A+TREn0Ch63WKnPFr5YOnuPn7i7OM7Z33D84gH0kG+UtIjm
+5YnOJjfd1i/XtP3RiIlsjPB7F2c4r3E                                                          NezOx/P+ihHUVdxZlMVryIvVprSX78CV9NMX3a9PzrQfir1+WX0Ps0RtjRNuPZ1dBFE+ZHeaoIsIelt83OmaO+9na
+eDBjmD06Gk/jzmf+O20+7nAo3k9ulHs                                                          5eRPSeezP6PsUSk7yDmf/30lxetBej0DfKXuZyCnw6MvB0dfD40Mt9NAxZ7ngWf8LKXjjFDR45TwhJ6Lfz04VOrX4
+z6lfjvweyWfjvzsgR36KfZy7Gek08Gf                                                          UcyjVux5+Ge4Hf8Zth8AKvpyBKikQ23EH44Bjfh/HQTa4y9z6acZ9W1EfxzXn0f3eSioh4FH1FTR79HQg34OhgpR/
+s+QwpMxQyeVKo/J7jHNcEHcRoi3ORu7                                                          56ft84vMe5IvuDQm9dE8vDjh6gs84JZDKO2Dd5cesLc/3WpnWp+o89NDzxvqU2w+5drr+ZjMTu4/Pz//F2FBh1nZR
+gAA
+"""
+
+
+@functools.lru_cache(maxsize=1)
+def _emojify_basic_names() -> frozenset[str]:
+    blob = re.sub(r"\s+", "", _EMOJIFY_BASIC_NAMES_B64_GZ)
+    raw = gzip.decompress(base64.b64decode(blob))
+    names = raw.decode("utf-8").splitlines()
+    return frozenset(n for n in names if n)
+
+
+_EMOJI_SHORTCODE_RE = re.compile(r":(?P<name>[a-zA-Z0-9_+\-]+):")
+
+
+def _emoji_img_html(name: str) -> str:
+    safe_name = _escape_attr(name)
+    return (
+        f'<img class="emoji" alt=":{safe_name}:" '
+        f'src="{_EMOJIFY_CDN_BASIC}/{safe_name}.png" '
+        'style="width:1.25em;height:1.25em;vertical-align:-0.2em"/>'
+    )
+
+
 def _replace_emoji_shortcodes(text: str) -> str:
+    """Replace :shortcode: emojis.
+
+    HackMD/CodiMD uses emoji-cheat-sheet style shortcodes (via emojify.js).
+    Instead of maintaining a massive mapping table, we rely on the Python
+    `emoji` library's alias database (GitHub/cheatsheet-style).
+    """
+
     if not text:
         return text
-    out = text
-    for k, v in _EMOJI_SHORTCODES.items():
-        out = out.replace(k, v)
-    return out
+
+    try:
+        import emoji  # type: ignore
+    except Exception:
+        emoji = None
+
+    def _flag_from_code(code: str) -> str:
+        code = code.upper()
+        if len(code) != 2 or not code.isalpha():
+            return f":flag_{code.lower()}:"
+        base = 0x1F1E6
+        return chr(base + (ord(code[0]) - ord("A"))) + chr(
+            base + (ord(code[1]) - ord("A"))
+        )
+
+    def _replace_token(m: re.Match[str]) -> str:
+        raw_name = m.group("name")
+        raw_token = f":{raw_name}:"
+
+        # 1) Exact overrides.
+        if raw_token in _EMOJI_SHORTCODES_OVERRIDES:
+            return _EMOJI_SHORTCODES_OVERRIDES[raw_token]
+
+        # 2) Flags (emojify.js uses flag-xx).
+        if raw_name.startswith("flag-") or raw_name.startswith("flag_"):
+            sep = "-" if "-" in raw_name else "_"
+            parts = raw_name.split(sep, 1)
+            if len(parts) == 2:
+                return _flag_from_code(parts[1])
+
+        # 3) Unicode alias via python-emoji.
+        if emoji is not None:
+            normalized = raw_name.replace("-", "_")
+            if normalized.startswith("female_"):
+                normalized = "woman_" + normalized[len("female_") :]
+            elif normalized.startswith("male_"):
+                normalized = "man_" + normalized[len("male_") :]
+
+            unicode_candidate = emoji.emojize(f":{normalized}:", language="alias")
+            if unicode_candidate != f":{normalized}:":
+                return unicode_candidate
+
+        # 4) Fallback to emojify.js image if the shortcode exists there.
+        names = _emojify_basic_names()
+        if raw_name in names:
+            return _emoji_img_html(raw_name)
+        alt = raw_name.replace("_", "-")
+        if alt in names:
+            return _emoji_img_html(alt)
+
+        return raw_token
+
+    return _EMOJI_SHORTCODE_RE.sub(_replace_token, text)
+
+
+def apply_hackmd_emojis(markdown_text: str) -> str:
+    """Apply emoji shortcode replacement globally, skipping fenced code blocks."""
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    # Skip fenced code blocks (``` or ~~~, length 3+).
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n?$", line)
+        if not m:
+            return None
+        f = m.group("fence")
+        return f[0], len(f)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*\n?$", line) is not None
+
+    inline_code_re = re.compile(r"(`+)([^`]*?)\1")
+
+    while i < len(lines):
+        line = lines[i]
+
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                fence_char, fence_len = opened
+                in_code = True
+                out.append(line)
+                i += 1
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+            out.append(line)
+            i += 1
+            continue
+
+        # Replace outside inline code spans.
+        replaced: list[str] = []
+        last = 0
+        for m in inline_code_re.finditer(line):
+            replaced.append(_replace_emoji_shortcodes(line[last : m.start()]))
+            replaced.append(line[m.start() : m.end()])
+            last = m.end()
+        replaced.append(_replace_emoji_shortcodes(line[last:]))
+        out.append("".join(replaced))
+        i += 1
+
+    return "".join(out)
 
 
 def _render_admonition_body_html(body_lines: list[str]) -> str:
@@ -357,11 +592,25 @@ def _format_inline_md_minimal(text: str) -> str:
     Supports **bold** and `code`.
     """
 
-    s = html.escape(text or "", quote=False)
+    raw = text or ""
+
+    # Preserve emojify-style <img class="emoji" .../> tags inserted by our emoji
+    # replacement logic; everything else gets HTML-escaped.
+    emoji_imgs: list[str] = []
+
+    def _stash_img(m: re.Match[str]) -> str:
+        emoji_imgs.append(m.group(0))
+        return f"@@COD0C_EMOJI_IMG_{len(emoji_imgs) - 1}@@"
+
+    s = re.sub(r"<img\s+class=\"emoji\"[^>]*?/?>", _stash_img, raw)
+    s = html.escape(s, quote=False)
     # Inline code first.
     s = re.sub(r"`([^`]+)`", lambda m: f"<code class=\"px-1 py-0.5 rounded bg-gray-100 text-gray-800\">{html.escape(m.group(1), quote=False)}</code>", s)
     # Bold.
     s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+
+    for idx, tag in enumerate(emoji_imgs):
+        s = s.replace(f"@@COD0C_EMOJI_IMG_{idx}@@", tag)
     return s
 
 
