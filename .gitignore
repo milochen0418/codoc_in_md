@@ -8,3 +8,6 @@ assets/external/
 __pycache__/
 /app/__pycache__/
 .playwright-mcp/
+
+# E2E testcase artifacts
+testcases/**/output/
