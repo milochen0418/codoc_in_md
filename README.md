@@ -70,6 +70,33 @@ Then open:
 - Frontend: http://localhost:3000
 - Backend: http://localhost:8000
 
+## E2E Tests (Playwright)
+
+E2E suites live under `testcases/<suite_name>/run_test.py`.
+
+Run suites via the repo runner (it starts/stops the Reflex server and collects artifacts):
+
+```bash
+poetry run ./run_test_suite.sh smoke_home
+```
+
+### Useful environment variables
+
+- `BASE_URL` (default `http://127.0.0.1:3000`)
+- `HEADLESS=0` to show the Chromium window (recommended while developing/debugging tests)
+- `PW_SLOWMO_MS=100` to slow actions down so you can watch what happens (only applies when supported by the test)
+- `PW_TIMEOUT_MS=60000` to increase Playwright timeouts on slower machines
+
+### Example: run a suite with visible Chromium
+
+This is helpful when debugging interaction-heavy suites (e.g. split view drag/scroll tests):
+
+```bash
+HEADLESS=0 PW_SLOWMO_MS=100 poetry run ./run_test_suite.sh split_view_operate
+```
+
+Artifacts (screenshots/logs) are written to `testcases/<suite_name>/output/`.
+
 ## Usage
 
 1) **Create a new document**
