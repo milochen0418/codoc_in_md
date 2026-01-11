@@ -65,6 +65,205 @@ _QUOTE_TAG_RE = re.compile(
 )
 
 
+_ADMONITION_START_RE = re.compile(r"^\s*:::(?P<kind>[a-zA-Z0-9_-]+)(?P<rest>.*)$")
+_ADMONITION_END_RE = re.compile(r"^\s*:::\s*$")
+_ADMONITION_ATTRS_RE = re.compile(r"^\s*\{(?P<attrs>[^}]*)\}\s*(?P<title>.*)$")
+
+_EMOJI_SHORTCODES: dict[str, str] = {
+    ":tada:": "🎉",
+    ":mega:": "📣",
+    ":zap:": "⚡",
+    ":fire:": "🔥",
+    ":stuck_out_tongue_winking_eye:": "😜",
+}
+
+
+def _replace_emoji_shortcodes(text: str) -> str:
+    if not text:
+        return text
+    out = text
+    for k, v in _EMOJI_SHORTCODES.items():
+        out = out.replace(k, v)
+    return out
+
+
+def _render_admonition_body_html(body_lines: list[str]) -> str:
+    # Convert lines into paragraphs; preserve blank lines.
+    paragraphs: list[list[str]] = []
+    buf: list[str] = []
+    for line in body_lines:
+        if not line.strip():
+            if buf:
+                paragraphs.append(buf)
+                buf = []
+            continue
+        buf.append(line)
+    if buf:
+        paragraphs.append(buf)
+
+    parts: list[str] = []
+    for para in paragraphs:
+        rendered_lines = []
+        for raw in para:
+            s = _replace_emoji_shortcodes(raw)
+            rendered_lines.append(_format_inline_md_minimal(s))
+        parts.append(
+            "<p style=\"margin:0\" class=\"text-gray-700 leading-relaxed\">"
+            + "<br/>".join(rendered_lines)
+            + "</p>"
+        )
+    # Add spacing between paragraphs.
+    return "<div style=\"display:flex;flex-direction:column;gap:0.5rem\">" + "".join(parts) + "</div>"
+
+
+def _admonition_styles(kind: str) -> tuple[str, str, str]:
+    """Return (border_color, bg_color, title_color) for built-in kinds."""
+
+    k = (kind or "").lower()
+    if k == "success":
+        return ("#16a34a", "#dcfce7", "#166534")
+    if k == "info":
+        return ("#0284c7", "#e0f2fe", "#075985")
+    if k == "warning":
+        return ("#f59e0b", "#fef9c3", "#92400e")
+    if k == "danger":
+        return ("#ef4444", "#fee2e2", "#991b1b")
+    # Fallback
+    return ("#cbd5e1", "#f8fafc", "#334155")
+
+
+def apply_hackmd_admonitions(markdown_text: str) -> str:
+    """Convert HackMD-style admonition blocks into raw HTML.
+
+    Supported forms:
+      :::success\n...\n:::
+      :::info\n...\n:::
+      :::warning\n...\n:::
+      :::danger\n...\n:::
+      :::spoiler Title\n...\n:::
+      :::spoiler {state="open"} Title\n...\n:::
+    """
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    # We skip inside fenced code blocks (``` or ~~~, length 3+).
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n?$", line)
+        if not m:
+            return None
+        f = m.group("fence")
+        return f[0], len(f)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*\n?$", line) is not None
+
+    while i < len(lines):
+        line = lines[i]
+
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                fence_char, fence_len = opened
+                in_code = True
+                out.append(line)
+                i += 1
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+            out.append(line)
+            i += 1
+            continue
+
+        m = _ADMONITION_START_RE.match(line.rstrip("\r\n"))
+        if not m:
+            out.append(line)
+            i += 1
+            continue
+
+        kind = (m.group("kind") or "").strip()
+        rest = (m.group("rest") or "").strip()
+
+        supported = {"success", "info", "warning", "danger", "spoiler"}
+        if kind.lower() not in supported:
+            out.append(line)
+            i += 1
+            continue
+
+        # Collect body until closing :::
+        body: list[str] = []
+        i += 1
+        while i < len(lines) and not _ADMONITION_END_RE.match(lines[i].rstrip("\r\n")):
+            body.append(lines[i].rstrip("\r\n"))
+            i += 1
+        # Consume closing line if present.
+        if i < len(lines) and _ADMONITION_END_RE.match(lines[i].rstrip("\r\n")):
+            i += 1
+
+        if kind.lower() == "spoiler":
+            title = rest
+            is_open = False
+            am = _ADMONITION_ATTRS_RE.match(rest)
+            if am:
+                attrs = am.group("attrs") or ""
+                title = (am.group("title") or "").strip()
+                if re.search(
+                    r"\bstate\s*=\s*(?:[\"“”]open[\"“”]|'open'|open)",
+                    attrs,
+                ):
+                    is_open = True
+
+            safe_title = _format_inline_md_minimal(_replace_emoji_shortcodes(title or ""))
+            body_html = _render_admonition_body_html(body)
+
+            open_attr = " open" if is_open else ""
+            # Styled details/summary similar to HackMD.
+            out.append(
+                "\n"
+                + f"<details{open_attr} style=\"border:1px solid #e5e7eb;border-radius:0.5rem;background:#f3f4f6;overflow:hidden;margin:1rem 0\">"
+                + f"<summary style=\"cursor:pointer;user-select:none;padding:0.75rem 1rem;font-weight:600;color:#374151\">{safe_title or 'Details'}</summary>"
+                + f"<div style=\"padding:0.75rem 1rem;background:#ffffff\">{body_html}</div>"
+                + "</details>\n"
+            )
+            continue
+
+        border, bg, title_color = _admonition_styles(kind)
+        title_text = kind.capitalize()
+        # If user wrote a single-line title in first content line, HackMD doesn't require it.
+        # We follow the provided syntax: content body contains the title.
+
+        body_html = _render_admonition_body_html(body)
+        out.append(
+            "\n"
+            + "<div "
+            + "style=\""
+            + f"border-left:4px solid {border};"
+            + f"background:{bg};"
+            + "padding:0.9rem 1rem;"
+            + "border-radius:0.5rem;"
+            + "margin:1rem 0;"
+            + "\""
+            + ">"
+            + f"<div style=\"font-weight:700;color:{title_color};margin-bottom:0.35rem\">{title_text}</div>"
+            + body_html
+            + "</div>\n"
+        )
+
+    return "".join(out)
+
+
 @dataclass
 class _QuoteNode:
     depth: int
