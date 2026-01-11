@@ -218,6 +218,25 @@
       return Math.max(0, Math.min(1, x));
     }
 
+    function cleanupHeadingText(raw) {
+      // Approximate the rendered heading text from markdown source.
+      // Example: "[書籍m模式](/book-example)" -> "書籍m模式"
+      let s = String(raw || '');
+      // Strip HTML tags.
+      s = s.replace(/<[^>]+>/g, ' ');
+      // Replace markdown images/links with their labels.
+      s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1');
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+      // Strip inline code.
+      s = s.replace(/`([^`]+)`/g, '$1');
+      // Strip common emphasis markers.
+      s = s.replace(/\*\*([^*]+)\*\*/g, '$1');
+      s = s.replace(/__([^_]+)__/g, '$1');
+      s = s.replace(/\*([^*]+)\*/g, '$1');
+      s = s.replace(/_([^_]+)_/g, '$1');
+      return normalizeText(s);
+    }
+
     function findPreviewHeading(preview, headingText) {
       const wanted = normalizeText(headingText);
       if (!wanted) return null;
@@ -283,7 +302,7 @@
           const m = /^(#{1,4})\s+(.+?)\s*$/.exec(line);
           if (m) {
             const level = m[1].length;
-            headings.push({ lineNumber: ln, level, text: normalizeText(m[2]) });
+            headings.push({ lineNumber: ln, level, text: cleanupHeadingText(m[2]) });
           }
         }
 
@@ -379,7 +398,10 @@
       hits = 0;
       for (const el of hs) {
         const t = normalizeText(el.textContent);
-        if (t.includes(wanted) || wanted.includes(t)) {
+        // Avoid reverse-substring matches that cause jumps, e.g.
+        // wanted="[書籍m模式](/...)" contains t="m模式".
+        const allowReverse = t.length >= Math.max(4, Math.floor(wanted.length * 0.9));
+        if (t.includes(wanted) || (allowReverse && wanted.includes(t))) {
           if (hits === occurrenceIdx) return el;
           hits += 1;
         }
