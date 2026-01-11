@@ -60,6 +60,241 @@ class FencedBlockExtension(Protocol):
         ...
 
 
+_QUOTE_TAG_RE = re.compile(
+    r"\[name=(?P<name>[^\]]+)\]\s*\[time=(?P<time>[^\]]+)\]\s*\[color=(?P<color>[^\]]+)\]"
+)
+
+
+@dataclass
+class _QuoteNode:
+    depth: int
+    lines: list[str]
+    children: list["_QuoteNode"]
+    name: str | None = None
+    time: str | None = None
+    color: str | None = None
+
+
+def _count_blockquote_depth(line: str) -> tuple[int, str] | None:
+    """Return (depth, content) if line is a blockquote line, else None.
+
+    Accepts `>` and `> ` and nesting like `>>` / `> >`.
+    """
+
+    i = 0
+    n = len(line)
+    depth = 0
+    while i < n:
+        # Optional leading spaces are allowed before a quote marker.
+        while i < n and line[i] in " \t":
+            i += 1
+        if i < n and line[i] == ">":
+            depth += 1
+            i += 1
+            # Optional single space after >
+            if i < n and line[i] == " ":
+                i += 1
+            continue
+        break
+
+    if depth == 0:
+        return None
+    return depth, line[i:]
+
+
+def _parse_quote_tree(lines: list[str]) -> list[_QuoteNode]:
+    roots: list[_QuoteNode] = []
+    stack: list[_QuoteNode] = []
+
+    for raw in lines:
+        parsed = _count_blockquote_depth(raw)
+        if parsed is None:
+            # Not a quote line (shouldn't happen here).
+            continue
+        depth, content = parsed
+
+        while stack and stack[-1].depth > depth:
+            stack.pop()
+
+        if not stack or stack[-1].depth < depth:
+            node = _QuoteNode(depth=depth, lines=[], children=[])
+            if stack:
+                stack[-1].children.append(node)
+            else:
+                roots.append(node)
+            stack.append(node)
+
+        # Now stack[-1].depth == depth
+        stack[-1].lines.append(content.rstrip("\r\n"))
+
+    return roots
+
+
+def _extract_quote_meta(node: _QuoteNode) -> None:
+    """Extract [name/time/color] tags from the node's lines.
+
+    HackMD uses a separate line inside the quote to specify metadata.
+    We remove that line from rendered content.
+    """
+
+    kept: list[str] = []
+    for line in node.lines:
+        m = _QUOTE_TAG_RE.search(line.strip())
+        if m and node.name is None and node.time is None and node.color is None:
+            node.name = m.group("name").strip()
+            node.time = m.group("time").strip()
+            node.color = m.group("color").strip()
+            continue
+        kept.append(line)
+    node.lines = kept
+
+    for child in node.children:
+        _extract_quote_meta(child)
+
+
+def _format_inline_md_minimal(text: str) -> str:
+    """Minimal inline markdown rendering for quote bodies.
+
+    Supports **bold** and `code`.
+    """
+
+    s = html.escape(text or "", quote=False)
+    # Inline code first.
+    s = re.sub(r"`([^`]+)`", lambda m: f"<code class=\"px-1 py-0.5 rounded bg-gray-100 text-gray-800\">{html.escape(m.group(1), quote=False)}</code>", s)
+    # Bold.
+    s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+    return s
+
+
+def _render_quote_node_html(node: _QuoteNode) -> str:
+    color = (node.color or "#CBD5E1").strip()  # default similar to border-gray-300
+    safe_color = _escape_attr(color)
+    safe_name = html.escape(node.name or "", quote=False)
+    safe_time = html.escape(node.time or "", quote=False)
+
+    # Split into paragraphs by blank lines.
+    paragraphs: list[str] = []
+    buf: list[str] = []
+    for line in node.lines:
+        if not line.strip():
+            if buf:
+                paragraphs.append("\n".join(buf))
+                buf = []
+            continue
+        buf.append(line)
+    if buf:
+        paragraphs.append("\n".join(buf))
+
+    body_parts: list[str] = []
+    for para in paragraphs:
+        rendered = "<br/>".join(_format_inline_md_minimal(x) for x in para.split("\n"))
+        body_parts.append(f"<p class=\"mb-3 last:mb-0 text-gray-700 leading-relaxed\">{rendered}</p>")
+
+    for child in node.children:
+        body_parts.append(_render_quote_node_html(child))
+
+    user_icon = (
+        "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" "
+        "style=\"width:1rem;height:1rem;color:#9CA3AF;flex:none\" "
+        "fill=\"none\" stroke=\"currentColor\" "
+        "stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+        "<path d=\"M20 21a8 8 0 0 0-16 0\"/>"
+        "<circle cx=\"12\" cy=\"8\" r=\"4\"/>"
+        "</svg>"
+    )
+    clock_icon = (
+        "<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\" "
+        "style=\"width:1rem;height:1rem;color:#9CA3AF;flex:none\" "
+        "fill=\"none\" stroke=\"currentColor\" "
+        "stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\">"
+        "<circle cx=\"12\" cy=\"12\" r=\"9\"/>"
+        "<path d=\"M12 7v6l3 2\"/>"
+        "</svg>"
+    )
+
+    meta_html = ""
+    if node.name or node.time:
+        # HackMD-like meta row with user + clock icons.
+        parts: list[str] = []
+        if node.name:
+            parts.append(
+                "<span style=\"display:inline-flex;align-items:center;gap:0.25rem\">"
+                + user_icon
+                + f"<span style=\\\"font-weight:500;color:#374151\\\">{safe_name}</span>"
+                + "</span>"
+            )
+        if node.time:
+            parts.append(
+                "<span style=\"display:inline-flex;align-items:center;gap:0.25rem\">"
+                + clock_icon
+                + f"<span>{safe_time}</span>"
+                + "</span>"
+            )
+        meta_html = (
+            "<div class=\"mt-2 text-sm text-gray-500\" "
+            "style=\"display:flex;align-items:center;gap:0.75rem;flex-wrap:nowrap;white-space:nowrap;overflow-x:auto\">"
+            "<span style=\"color:#9CA3AF\">—</span>"
+            + "".join(parts)
+            + "</div>"
+        )
+
+    # Use a dedicated wrapper so nested quotes look consistent.
+    return (
+        f"<div class=\"my-4 pl-4 border-l-4\" style=\"border-left-color:{safe_color}\">"
+        + "".join(body_parts)
+        + meta_html
+        + "</div>"
+    )
+
+
+def apply_hackmd_blockquote_labels(markdown_text: str) -> str:
+    """Render HackMD-style blockquote labels.
+
+    Detects quote blocks that include a metadata line of the form:
+      [name=...] [time=...] [color=...]
+    and converts the whole blockquote region into styled HTML.
+
+    Nested quotes are supported.
+    """
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+
+    while i < len(lines):
+        if _count_blockquote_depth(lines[i]) is None:
+            out.append(lines[i])
+            i += 1
+            continue
+
+        # Collect a contiguous quote block.
+        start = i
+        i += 1
+        while i < len(lines) and _count_blockquote_depth(lines[i]) is not None:
+            i += 1
+        block_lines = lines[start:i]
+
+        # Only transform if we see at least one tag line anywhere in the block.
+        if not any(_QUOTE_TAG_RE.search((_count_blockquote_depth(l) or (0, ""))[1].strip()) for l in block_lines):
+            out.extend(block_lines)
+            continue
+
+        roots = _parse_quote_tree(block_lines)
+        for r in roots:
+            _extract_quote_meta(r)
+
+        html_blocks = "\n".join(_render_quote_node_html(r) for r in roots)
+
+        # Ensure HTML is treated as a block.
+        out.append("\n" + html_blocks + "\n")
+
+    return "".join(out)
+
+
 _DIRECTIVE_RE = re.compile(
     r"\{\%\s*(?P<name>[A-Za-z0-9_-]+)(?:\s+(?P<args>.*?))?\s*\%\}",
     re.IGNORECASE | re.DOTALL,
