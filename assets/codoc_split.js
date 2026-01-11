@@ -21,7 +21,7 @@
     syncing: false,
     pendingPreviewSync: false,
     lastHeadingText: null,
-    editorH2Cache: { versionId: null, lines: [] },
+    editorH2Cache: { versionId: null, headings: [] },
     retryTimer: null,
     retryCount: 0,
   };
@@ -232,7 +232,7 @@
     function buildEditorH2Cache(editor) {
       try {
         const model = editor && typeof editor.getModel === 'function' ? editor.getModel() : null;
-        if (!model) return { versionId: null, lines: [] };
+        if (!model) return { versionId: null, headings: [] };
         const versionId = typeof model.getVersionId === 'function' ? model.getVersionId() : null;
 
         if (state.editorH2Cache && state.editorH2Cache.versionId === versionId) {
@@ -240,7 +240,7 @@
         }
 
         const lineCount = typeof model.getLineCount === 'function' ? model.getLineCount() : 0;
-        const lines = [];
+        const headings = [];
 
         // Avoid false positives: headings inside fenced code blocks shouldn't count.
         let inCode = false;
@@ -280,16 +280,17 @@
             continue;
           }
 
-          const m = /^(##)\s+(.+?)\s*$/.exec(line);
+          const m = /^(#{1,4})\s+(.+?)\s*$/.exec(line);
           if (m) {
-            lines.push({ lineNumber: ln, text: normalizeText(m[2]) });
+            const level = m[1].length;
+            headings.push({ lineNumber: ln, level, text: normalizeText(m[2]) });
           }
         }
 
-        state.editorH2Cache = { versionId, lines };
+        state.editorH2Cache = { versionId, headings };
         return state.editorH2Cache;
       } catch (_) {
-        return { versionId: null, lines: [] };
+        return { versionId: null, headings: [] };
       }
     }
 
@@ -307,14 +308,14 @@
       return 1;
     }
 
-    function findSectionIndexForTopLine(h2Lines, topLine) {
+    function findSectionIndexForTopLine(headings, topLine) {
       // Returns the last index where lineNumber <= topLine, or -1 if before first H2.
       let lo = 0;
-      let hi = h2Lines.length - 1;
+      let hi = headings.length - 1;
       let ans = -1;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
-        const ln = h2Lines[mid].lineNumber;
+        const ln = headings[mid].lineNumber;
         if (ln <= topLine) {
           ans = mid;
           lo = mid + 1;
@@ -359,14 +360,15 @@
       }
     }
 
-    function previewH2ByTextOccurrence(preview, text, occurrenceIdx) {
+    function previewHeadingByTextOccurrence(preview, level, text, occurrenceIdx) {
       const wanted = normalizeText(text);
       if (!wanted) return null;
-      const h2s = Array.from(preview.querySelectorAll('h2'));
+      const selector = level ? 'h' + String(level) : 'h1,h2,h3,h4,h5,h6';
+      const hs = Array.from(preview.querySelectorAll(selector));
 
       // 1) Exact matches by normalized text.
       let hits = 0;
-      for (const el of h2s) {
+      for (const el of hs) {
         if (normalizeText(el.textContent) === wanted) {
           if (hits === occurrenceIdx) return el;
           hits += 1;
@@ -375,7 +377,7 @@
 
       // 2) Tolerant matches (includes), e.g. emoji/inline nodes/extra whitespace.
       hits = 0;
-      for (const el of h2s) {
+      for (const el of hs) {
         const t = normalizeText(el.textContent);
         if (t.includes(wanted) || wanted.includes(t)) {
           if (hits === occurrenceIdx) return el;
@@ -386,39 +388,46 @@
       return null;
     }
 
-    function occurrenceIndexInEditorH2s(h2Lines, idx) {
-      if (idx == null || idx < 0 || idx >= h2Lines.length) return 0;
-      const wanted = h2Lines[idx].text;
+    function occurrenceIndexInEditorHeadings(headings, idx) {
+      if (idx == null || idx < 0 || idx >= headings.length) return 0;
+      const wanted = headings[idx].text;
+      const level = headings[idx].level;
       let occ = 0;
       for (let i = 0; i <= idx; i += 1) {
-        if (h2Lines[i].text === wanted) occ += 1;
+        if (headings[i].level === level && headings[i].text === wanted) occ += 1;
       }
       return Math.max(0, occ - 1);
     }
 
-    function scrollPreviewToSectionProgress(preview, startIdx, nextIdx, progress, editorHeadingText, editorNextHeadingText, h2Lines) {
+    function scrollPreviewToSectionProgress(
+      preview,
+      startIdx,
+      nextIdx,
+      progress,
+      startHeading,
+      nextHeading,
+      headings
+    ) {
       try {
-        const h2s = Array.from(preview.querySelectorAll('h2'));
-
         let startTop = 0;
-        if (startIdx >= 0) {
-          const startOcc = occurrenceIndexInEditorH2s(h2Lines || [], startIdx);
+        if (startIdx >= 0 && startHeading) {
+          const startOcc = occurrenceIndexInEditorHeadings(headings || [], startIdx);
           const startEl =
-            (editorHeadingText ? previewH2ByTextOccurrence(preview, editorHeadingText, startOcc) : null) ||
-            h2s[startIdx] ||
-            (editorHeadingText ? findPreviewHeading(preview, editorHeadingText) : null);
+            previewHeadingByTextOccurrence(preview, startHeading.level, startHeading.text, startOcc) ||
+            previewHeadingByTextOccurrence(preview, null, startHeading.text, startOcc) ||
+            findPreviewHeading(preview, startHeading.text);
           if (startEl) {
             startTop = getOffsetTopInScrollContainer(preview, startEl);
           }
         }
 
         let endTop = null;
-        if (nextIdx != null && nextIdx >= 0) {
-          const nextOcc = occurrenceIndexInEditorH2s(h2Lines || [], nextIdx);
+        if (nextIdx != null && nextIdx >= 0 && nextHeading) {
+          const nextOcc = occurrenceIndexInEditorHeadings(headings || [], nextIdx);
           const endEl =
-            (editorNextHeadingText ? previewH2ByTextOccurrence(preview, editorNextHeadingText, nextOcc) : null) ||
-            h2s[nextIdx] ||
-            (editorNextHeadingText ? findPreviewHeading(preview, editorNextHeadingText) : null);
+            previewHeadingByTextOccurrence(preview, nextHeading.level, nextHeading.text, nextOcc) ||
+            previewHeadingByTextOccurrence(preview, null, nextHeading.text, nextOcc) ||
+            findPreviewHeading(preview, nextHeading.text);
           if (endEl) {
             endTop = getOffsetTopInScrollContainer(preview, endEl);
           }
@@ -474,20 +483,21 @@
 
       state.syncing = true;
 
-      // Section-aware sync (H2/##): within each section, map editor scroll progress
-      // to preview scroll progress proportionally.
+      // Section-aware sync (#..####): within each heading section, map editor scroll
+      // progress to preview scroll progress proportionally.
       try {
         if (ed && typeof ed.getModel === 'function') {
           const cache = buildEditorH2Cache(ed);
-          const h2Lines = cache.lines || [];
+          const headings = cache.headings || [];
           const topLine = getEditorTopLine(ed);
-          const startIdx = findSectionIndexForTopLine(h2Lines, topLine);
+          const startIdx = findSectionIndexForTopLine(headings, topLine);
 
-          const startLine = startIdx >= 0 ? h2Lines[startIdx].lineNumber : 1;
-          const nextIdx = startIdx + 1 < h2Lines.length ? startIdx + 1 : null;
-          const nextLine = nextIdx != null ? h2Lines[nextIdx].lineNumber : null;
-          const headingText = startIdx >= 0 ? h2Lines[startIdx].text : null;
-          const nextHeadingText = nextIdx != null ? h2Lines[nextIdx].text : null;
+          const startHeading = startIdx >= 0 ? headings[startIdx] : null;
+          const nextIdx = startIdx + 1 < headings.length ? startIdx + 1 : null;
+          const nextHeading = nextIdx != null ? headings[nextIdx] : null;
+
+          const startLine = startHeading ? startHeading.lineNumber : 1;
+          const nextLine = nextHeading ? nextHeading.lineNumber : null;
 
           const prog = computeSectionProgress(ed, startLine, nextLine);
           if (prog.ok) {
@@ -496,12 +506,12 @@
               startIdx,
               nextIdx,
               prog.progress,
-              headingText,
-              nextHeadingText,
-              h2Lines
+              startHeading,
+              nextHeading,
+              headings
             );
             if (ok) {
-              state.lastHeadingText = headingText;
+              state.lastHeadingText = startHeading ? startHeading.text : null;
               requestAnimationFrame(function () {
                 state.syncing = false;
               });
