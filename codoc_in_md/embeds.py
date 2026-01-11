@@ -229,6 +229,92 @@ def apply_hackmd_typography(markdown_text: str) -> str:
     text = markdown_text or ""
     out_parts: list[str] = []
 
+    # Be tolerant like HackMD/markdown-it: allow 1+ dashes.
+    # We will normalize to 3 dashes later so remark-gfm reliably parses tables.
+    _TABLE_DELIM_RE = re.compile(
+        r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$"
+    )
+
+    _TABLE_CELL_RE = re.compile(r"(?P<lead>\|\s*)(?P<cell>:?-{1,}:?)(?=\s*\||\s*$)")
+
+    def _normalize_table_delim_line(line: str) -> str:
+        """Normalize a GFM table delimiter line.
+
+        HackMD accepts as few as 1 dash; remark-gfm expects 3+. To make preview match
+        HackMD behavior, we keep alignment markers but pad dashes to at least 3.
+        """
+
+        raw = line.rstrip("\r\n")
+        suffix = line[len(raw) :]
+
+        def _pad(cell: str) -> str:
+            left = ":" if cell.startswith(":") else ""
+            right = ":" if cell.endswith(":") else ""
+            dash_count = max(0, len(cell) - len(left) - len(right))
+            dashes = "-" * max(3, dash_count)
+            return f"{left}{dashes}{right}"
+
+        # Ensure the line has leading/trailing pipes for consistent parsing.
+        if "|" not in raw:
+            return line
+
+        s = raw
+        if not s.strip().startswith("|"):
+            s = "|" + s
+        if not s.strip().endswith("|"):
+            s = s + "|"
+
+        def _repl(m: re.Match[str]) -> str:
+            return f"{m.group('lead')}{_pad(m.group('cell'))}"
+
+        s = _TABLE_CELL_RE.sub(_repl, s)
+        return s + suffix
+
+    def _iter_table_aware_parts(buf: str) -> list[tuple[bool, str]]:
+        """Split a string into (is_table, text) parts.
+
+        This prevents typography transforms from breaking GFM tables.
+        """
+
+        if not buf:
+            return [(False, buf)]
+
+        lines = buf.splitlines(keepends=True)
+        parts: list[tuple[bool, str]] = []
+        i = 0
+
+        def _is_header_line(line: str) -> bool:
+            s = line.strip()
+            if "|" not in s:
+                return False
+            # Require some non-syntax content.
+            return any(ch not in "|:- " for ch in s)
+
+        def _is_delim_line(line: str) -> bool:
+            return _TABLE_DELIM_RE.match(line.rstrip("\r\n")) is not None
+
+        while i < len(lines):
+            if i + 1 < len(lines) and _is_header_line(lines[i]) and _is_delim_line(lines[i + 1]):
+                start = i
+                # Normalize delimiter line to keep table parsing stable.
+                lines[i + 1] = _normalize_table_delim_line(lines[i + 1])
+                i += 2
+                while i < len(lines) and lines[i].strip() and ("|" in lines[i]):
+                    i += 1
+                parts.append((True, "".join(lines[start:i])))
+                continue
+
+            # Normal text: accumulate until next table start.
+            start = i
+            i += 1
+            while i < len(lines):
+                if i + 1 < len(lines) and _is_header_line(lines[i]) and _is_delim_line(lines[i + 1]):
+                    break
+                i += 1
+            parts.append((False, "".join(lines[start:i])))
+
+        return parts
+
     def _process_noncode(segment: str) -> str:
         if not segment:
             return segment
@@ -244,28 +330,32 @@ def apply_hackmd_typography(markdown_text: str) -> str:
             pos = m.end()
         parts.append(segment[pos:])
 
-        # Apply typography to each non-directive chunk, preserving inline code.
+        # Apply typography to each non-directive chunk, preserving inline code and tables.
         for i, chunk in enumerate(parts):
             if i % 2 == 1:
                 out_parts.append(chunk)
                 continue
 
-            # Split on inline code spans (backticks) and only transform non-code.
-            buf = chunk
-            j = 0
-            while j < len(buf):
-                tick = buf.find("`", j)
-                if tick == -1:
-                    out_parts.append(_apply_typography_to_text(buf[j:]))
-                    break
-                # Find matching tick.
-                end = buf.find("`", tick + 1)
-                if end == -1:
-                    out_parts.append(_apply_typography_to_text(buf[j:]))
-                    break
-                out_parts.append(_apply_typography_to_text(buf[j:tick]))
-                out_parts.append(buf[tick : end + 1])
-                j = end + 1
+            for is_table, buf in _iter_table_aware_parts(chunk):
+                if is_table:
+                    out_parts.append(buf)
+                    continue
+
+                # Split on inline code spans (backticks) and only transform non-code.
+                j = 0
+                while j < len(buf):
+                    tick = buf.find("`", j)
+                    if tick == -1:
+                        out_parts.append(_apply_typography_to_text(buf[j:]))
+                        break
+                    # Find matching tick.
+                    end = buf.find("`", tick + 1)
+                    if end == -1:
+                        out_parts.append(_apply_typography_to_text(buf[j:]))
+                        break
+                    out_parts.append(_apply_typography_to_text(buf[j:tick]))
+                    out_parts.append(buf[tick : end + 1])
+                    j = end + 1
         return ""
 
     # Robust fenced-block skipping: supports 3+ backticks/tildes and won't be confused by
