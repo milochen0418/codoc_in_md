@@ -12,7 +12,8 @@ def editor_panel() -> rx.Component:
     """The raw Monaco editor panel."""
     return rx.el.div(
         monaco(
-            value=EditorState.doc_content,
+            key=EditorState.editor_component_key,
+            default_value=EditorState.editor_seed_content,
             language="markdown",
             theme="vs-light",
             on_change=EditorState.update_content,

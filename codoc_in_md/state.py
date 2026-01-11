@@ -82,6 +82,16 @@ class EditorState(rx.State):
     last_version: int = 0
     view_mode: str = "split"
 
+    # Monaco editor should be treated as uncontrolled for a stable cursor.
+    # We keep an initial seed value that only changes when the document is (re)loaded
+    # or when we intentionally refresh the editor (e.g., remote overwrite).
+    editor_seed_content: str = ""
+    editor_seed_version: int = 0
+
+    @rx.var
+    def editor_component_key(self) -> str:
+        return f"{self.doc_id}:{self.editor_seed_version}"
+
     def _generate_user_info(self):
         """Generates a random identity for the session."""
         adjectives = [
@@ -166,12 +176,16 @@ class EditorState(rx.State):
                 self.doc_content = db_doc["content"]
                 self.doc_content_rendered = _render_markdown_source(self.doc_content)
                 self.last_version = db_doc["version"]
+                self.editor_seed_content = self.doc_content
+                self.editor_seed_version += 1
             else:
                 default_content = "# Start typing your masterpiece..."
                 self.doc_content = default_content
                 self.doc_content_rendered = _render_markdown_source(default_content)
                 self._save_doc_to_db(doc_id, default_content)
                 self.last_version = 1
+                self.editor_seed_content = default_content
+                self.editor_seed_version += 1
             self.is_connected = True
             self.is_syncing = True
             self.is_loading = False
@@ -211,14 +225,16 @@ class EditorState(rx.State):
                         self.doc_content = remote_doc["content"]
                         self.doc_content_rendered = _render_markdown_source(self.doc_content)
                         self.last_version = remote_doc["version"]
+                        # Remote overwrite: refresh the Monaco seed to match.
+                        self.editor_seed_content = self.doc_content
+                        self.editor_seed_version += 1
 
             await asyncio.sleep(0.5)
 
     @rx.event
     def update_content(self, new_content: str):
-        """
-        Updates the document content locally and persists to in-memory store.
-        """
+        """Updates the document content locally and persists to in-memory store."""
+
         self.doc_content = new_content
         self.doc_content_rendered = _render_markdown_source(new_content)
         self._save_doc_to_db(self.doc_id, new_content)
