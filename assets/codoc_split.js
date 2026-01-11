@@ -21,6 +21,7 @@
     syncing: false,
     pendingPreviewSync: false,
     lastHeadingText: null,
+    editorH2Cache: { versionId: null, lines: [] },
     retryTimer: null,
     retryCount: 0,
   };
@@ -207,6 +208,16 @@
       }
     }
 
+    function getOffsetTopInScrollContainer(scrollEl, childEl) {
+      const sr = scrollEl.getBoundingClientRect();
+      const cr = childEl.getBoundingClientRect();
+      return cr.top - sr.top + scrollEl.scrollTop - 8;
+    }
+
+    function clamp01(x) {
+      return Math.max(0, Math.min(1, x));
+    }
+
     function findPreviewHeading(preview, headingText) {
       const wanted = normalizeText(headingText);
       if (!wanted) return null;
@@ -216,6 +227,211 @@
       // Be tolerant: some renderers may add extra whitespace/inline nodes.
       match = headings.find((h) => normalizeText(h.textContent).includes(wanted));
       return match || null;
+    }
+
+    function buildEditorH2Cache(editor) {
+      try {
+        const model = editor && typeof editor.getModel === 'function' ? editor.getModel() : null;
+        if (!model) return { versionId: null, lines: [] };
+        const versionId = typeof model.getVersionId === 'function' ? model.getVersionId() : null;
+
+        if (state.editorH2Cache && state.editorH2Cache.versionId === versionId) {
+          return state.editorH2Cache;
+        }
+
+        const lineCount = typeof model.getLineCount === 'function' ? model.getLineCount() : 0;
+        const lines = [];
+
+        // Avoid false positives: headings inside fenced code blocks shouldn't count.
+        let inCode = false;
+        let fenceChar = '';
+        let fenceLen = 0;
+
+        function maybeOpenFence(rawLine) {
+          const m = /^\s{0,3}([`~]{3,})(.*)$/.exec(rawLine);
+          if (!m) return null;
+          const fence = m[1];
+          return { ch: fence[0], len: fence.length };
+        }
+
+        function isFenceClose(rawLine, ch, len) {
+          if (!ch || !len) return false;
+          const re = new RegExp('^\\s{0,3}' + (ch === '`' ? '`' : '~') + '{' + len + ',}\\s*$');
+          return re.test(rawLine);
+        }
+
+        for (let ln = 1; ln <= lineCount; ln += 1) {
+          const line = (model.getLineContent(ln) || '').replace(/\r$/, '');
+
+          if (!inCode) {
+            const opened = maybeOpenFence(line);
+            if (opened) {
+              inCode = true;
+              fenceChar = opened.ch;
+              fenceLen = opened.len;
+              continue;
+            }
+          } else {
+            if (isFenceClose(line, fenceChar, fenceLen)) {
+              inCode = false;
+              fenceChar = '';
+              fenceLen = 0;
+            }
+            continue;
+          }
+
+          const m = /^(##)\s+(.+?)\s*$/.exec(line);
+          if (m) {
+            lines.push({ lineNumber: ln, text: normalizeText(m[2]) });
+          }
+        }
+
+        state.editorH2Cache = { versionId, lines };
+        return state.editorH2Cache;
+      } catch (_) {
+        return { versionId: null, lines: [] };
+      }
+    }
+
+    function getEditorTopLine(editor) {
+      try {
+        if (editor && typeof editor.getVisibleRanges === 'function') {
+          const ranges = editor.getVisibleRanges() || [];
+          if (ranges.length && ranges[0] && ranges[0].startLineNumber) {
+            return ranges[0].startLineNumber;
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+      return 1;
+    }
+
+    function findSectionIndexForTopLine(h2Lines, topLine) {
+      // Returns the last index where lineNumber <= topLine, or -1 if before first H2.
+      let lo = 0;
+      let hi = h2Lines.length - 1;
+      let ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const ln = h2Lines[mid].lineNumber;
+        if (ln <= topLine) {
+          ans = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return ans;
+    }
+
+    function computeSectionProgress(editor, startLine, nextLine) {
+      // Map editor.scrollTop from startLine -> nextLine (or EOF) into [0..1].
+      // Add a small deadzone near section start to create a subtle “stuck” feel.
+      const DEADZONE_PX = 14;
+      try {
+        if (!editor || typeof editor.getScrollTop !== 'function') return { ok: false, progress: 0 };
+        const scrollTop = editor.getScrollTop();
+
+        let startTop = 0;
+        if (typeof editor.getTopForLineNumber === 'function') {
+          startTop = editor.getTopForLineNumber(Math.max(1, startLine));
+        }
+
+        let endTop = null;
+        if (nextLine && typeof editor.getTopForLineNumber === 'function') {
+          endTop = editor.getTopForLineNumber(Math.max(1, nextLine));
+        } else {
+          const eHeight = typeof editor.getScrollHeight === 'function' ? editor.getScrollHeight() : 0;
+          const eViewport =
+            typeof editor.getLayoutInfo === 'function' && editor.getLayoutInfo() ? editor.getLayoutInfo().height : 0;
+          endTop = Math.max(0, eHeight - eViewport);
+        }
+
+        const rawLen = Math.max(1, endTop - startTop);
+        const delta = scrollTop - startTop;
+        const deadz = Math.min(DEADZONE_PX, Math.max(0, rawLen - 1));
+        const effectiveDelta = Math.max(0, delta - deadz);
+        const effectiveLen = Math.max(1, rawLen - deadz);
+        return { ok: true, progress: clamp01(effectiveDelta / effectiveLen) };
+      } catch (_) {
+        return { ok: false, progress: 0 };
+      }
+    }
+
+    function previewH2ByTextOccurrence(preview, text, occurrenceIdx) {
+      const wanted = normalizeText(text);
+      if (!wanted) return null;
+      const h2s = Array.from(preview.querySelectorAll('h2'));
+
+      // 1) Exact matches by normalized text.
+      let hits = 0;
+      for (const el of h2s) {
+        if (normalizeText(el.textContent) === wanted) {
+          if (hits === occurrenceIdx) return el;
+          hits += 1;
+        }
+      }
+
+      // 2) Tolerant matches (includes), e.g. emoji/inline nodes/extra whitespace.
+      hits = 0;
+      for (const el of h2s) {
+        const t = normalizeText(el.textContent);
+        if (t.includes(wanted) || wanted.includes(t)) {
+          if (hits === occurrenceIdx) return el;
+          hits += 1;
+        }
+      }
+
+      return null;
+    }
+
+    function occurrenceIndexInEditorH2s(h2Lines, idx) {
+      if (idx == null || idx < 0 || idx >= h2Lines.length) return 0;
+      const wanted = h2Lines[idx].text;
+      let occ = 0;
+      for (let i = 0; i <= idx; i += 1) {
+        if (h2Lines[i].text === wanted) occ += 1;
+      }
+      return Math.max(0, occ - 1);
+    }
+
+    function scrollPreviewToSectionProgress(preview, startIdx, nextIdx, progress, editorHeadingText, editorNextHeadingText, h2Lines) {
+      try {
+        const h2s = Array.from(preview.querySelectorAll('h2'));
+
+        let startTop = 0;
+        if (startIdx >= 0) {
+          const startOcc = occurrenceIndexInEditorH2s(h2Lines || [], startIdx);
+          const startEl =
+            (editorHeadingText ? previewH2ByTextOccurrence(preview, editorHeadingText, startOcc) : null) ||
+            h2s[startIdx] ||
+            (editorHeadingText ? findPreviewHeading(preview, editorHeadingText) : null);
+          if (startEl) {
+            startTop = getOffsetTopInScrollContainer(preview, startEl);
+          }
+        }
+
+        let endTop = null;
+        if (nextIdx != null && nextIdx >= 0) {
+          const nextOcc = occurrenceIndexInEditorH2s(h2Lines || [], nextIdx);
+          const endEl =
+            (editorNextHeadingText ? previewH2ByTextOccurrence(preview, editorNextHeadingText, nextOcc) : null) ||
+            h2s[nextIdx] ||
+            (editorNextHeadingText ? findPreviewHeading(preview, editorNextHeadingText) : null);
+          if (endEl) {
+            endTop = getOffsetTopInScrollContainer(preview, endEl);
+          }
+        }
+        if (endTop == null) {
+          endTop = Math.max(0, preview.scrollHeight - preview.clientHeight);
+        }
+
+        preview.scrollTop = startTop + (endTop - startTop) * clamp01(progress);
+        return true;
+      } catch (_) {
+        return false;
+      }
     }
 
     function getEditorTopHeading(editor) {
@@ -257,6 +473,45 @@
       const p = state.previewScrollEl;
 
       state.syncing = true;
+
+      // Section-aware sync (H2/##): within each section, map editor scroll progress
+      // to preview scroll progress proportionally.
+      try {
+        if (ed && typeof ed.getModel === 'function') {
+          const cache = buildEditorH2Cache(ed);
+          const h2Lines = cache.lines || [];
+          const topLine = getEditorTopLine(ed);
+          const startIdx = findSectionIndexForTopLine(h2Lines, topLine);
+
+          const startLine = startIdx >= 0 ? h2Lines[startIdx].lineNumber : 1;
+          const nextIdx = startIdx + 1 < h2Lines.length ? startIdx + 1 : null;
+          const nextLine = nextIdx != null ? h2Lines[nextIdx].lineNumber : null;
+          const headingText = startIdx >= 0 ? h2Lines[startIdx].text : null;
+          const nextHeadingText = nextIdx != null ? h2Lines[nextIdx].text : null;
+
+          const prog = computeSectionProgress(ed, startLine, nextLine);
+          if (prog.ok) {
+            const ok = scrollPreviewToSectionProgress(
+              p,
+              startIdx,
+              nextIdx,
+              prog.progress,
+              headingText,
+              nextHeadingText,
+              h2Lines
+            );
+            if (ok) {
+              state.lastHeadingText = headingText;
+              requestAnimationFrame(function () {
+                state.syncing = false;
+              });
+              return;
+            }
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
 
       // Prefer content-aware sync: align preview to the nearest visible heading.
       const heading = ed ? getEditorTopHeading(ed) : null;
