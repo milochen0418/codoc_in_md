@@ -5,6 +5,7 @@ import random
 import uuid
 import logging
 from typing import TypedDict, Optional
+from pathlib import Path
 
 from .embeds import (
     apply_hackmd_code_blocks_with_lines,
@@ -186,6 +187,16 @@ class EditorState(rx.State):
                 self.editor_seed_version += 1
             else:
                 default_content = "# Start typing your masterpiece..."
+
+                # Special fixture doc to validate emojify shortcode coverage.
+                if doc_id == "emojify":
+                    try:
+                        repo_root = Path(__file__).resolve().parents[1]
+                        fixture_path = repo_root / "assets" / "hackmd_emojify_all_shortcodes.md"
+                        default_content = fixture_path.read_text(encoding="utf-8")
+                    except Exception:
+                        # Fall back to the normal default if fixture isn't available.
+                        pass
                 self.doc_content = default_content
                 self.doc_content_rendered = _render_markdown_source(default_content)
                 self._save_doc_to_db(doc_id, default_content)

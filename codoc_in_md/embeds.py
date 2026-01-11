@@ -191,7 +191,7 @@ def _emoji_img_html(name: str) -> str:
     return (
         f'<img class="emoji" alt=":{safe_name}:" '
         f'src="{_EMOJIFY_CDN_BASIC}/{safe_name}.png" '
-        'style="width:1.25em;height:1.25em;vertical-align:-0.2em"/>'
+        'style="display:inline-block;width:1.25em;height:1.25em;vertical-align:-0.2em"/>'
     )
 
 
@@ -228,12 +228,12 @@ def _replace_emoji_shortcodes(text: str) -> str:
         if raw_token in _EMOJI_SHORTCODES_OVERRIDES:
             return _EMOJI_SHORTCODES_OVERRIDES[raw_token]
 
-        # 2) Flags (emojify.js uses flag-xx).
-        if raw_name.startswith("flag-") or raw_name.startswith("flag_"):
-            sep = "-" if "-" in raw_name else "_"
-            parts = raw_name.split(sep, 1)
-            if len(parts) == 2:
-                return _flag_from_code(parts[1])
+        # 2) Flags (unicode only for ISO-3166 2-letter country codes).
+        # emojify.js also includes non-country flags like flag-england/flag_scotland,
+        # which should fall back to images instead of unicode derivation.
+        m_flag = re.match(r"^flag[-_](?P<cc>[a-zA-Z]{2})$", raw_name)
+        if m_flag:
+            return _flag_from_code(m_flag.group("cc"))
 
         # 3) Unicode alias via python-emoji.
         if emoji is not None:
