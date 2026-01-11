@@ -22,6 +22,7 @@
     pendingPreviewSync: false,
     lastHeadingText: null,
     editorH2Cache: { versionId: null, headings: [] },
+    previewLineMarkerCache: { count: 0, lines: [], els: [] },
     retryTimer: null,
     retryCount: 0,
   };
@@ -327,6 +328,57 @@
       return 1;
     }
 
+    function getEditorLastLineTop(editor) {
+      try {
+        const model = editor && typeof editor.getModel === 'function' ? editor.getModel() : null;
+        if (!model || typeof model.getLineCount !== 'function') return null;
+        const lastLine = model.getLineCount();
+        if (typeof editor.getTopForLineNumber !== 'function') return null;
+        return editor.getTopForLineNumber(Math.max(1, lastLine));
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function isEditorBeyondLastLine(editor) {
+      // When Monaco allows scrolling beyond the last line, scrollTop can exceed
+      // the top position of the last line. In that "slack" region, we should
+      // freeze preview to avoid it moving while editor is effectively past EOF.
+      try {
+        if (!editor || typeof editor.getScrollTop !== 'function') return false;
+        const lastTop = getEditorLastLineTop(editor);
+        if (lastTop == null) return false;
+        const EPS = 2;
+        return editor.getScrollTop() > lastTop + EPS;
+      } catch (_) {
+        return false;
+      }
+    }
+
+    function getEditorScrollMetrics(editor) {
+      try {
+        if (!editor || typeof editor.getScrollTop !== 'function') return null;
+        const scrollTop = editor.getScrollTop();
+        const eHeight = typeof editor.getScrollHeight === 'function' ? editor.getScrollHeight() : null;
+        const eViewport =
+          typeof editor.getLayoutInfo === 'function' && editor.getLayoutInfo() ? editor.getLayoutInfo().height : null;
+        if (!Number.isFinite(eHeight) || !Number.isFinite(eViewport)) return null;
+        const maxScrollTop = Math.max(0, eHeight - eViewport);
+        return { scrollTop, maxScrollTop, viewport: eViewport };
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function isEditorNearBottom(editor) {
+      // Match the "manual trailing heading" feel:
+      // when user is in the bottom slack band, keep preview pinned.
+      const m = getEditorScrollMetrics(editor);
+      if (!m) return false;
+      const band = clamp(Math.floor(m.viewport * 0.6), 80, 420);
+      return m.maxScrollTop - m.scrollTop <= band;
+    }
+
     function findSectionIndexForTopLine(headings, topLine) {
       // Returns the last index where lineNumber <= topLine, or -1 if before first H2.
       let lo = 0;
@@ -345,10 +397,11 @@
       return ans;
     }
 
-    function computeSectionProgress(editor, startLine, nextLine) {
+    function computeSectionProgress(editor, startLine, nextLine, deadzonePx) {
       // Map editor.scrollTop from startLine -> nextLine (or EOF) into [0..1].
-      // Add a small deadzone near section start to create a subtle “stuck” feel.
-      const DEADZONE_PX = 14;
+      // deadzonePx is only for real headings (to create a subtle “stuck” feel).
+      // For soft anchors (line markers), pass 0.
+      const DEADZONE_PX = Number.isFinite(deadzonePx) ? Math.max(0, deadzonePx) : 14;
       try {
         if (!editor || typeof editor.getScrollTop !== 'function') return { ok: false, progress: 0 };
         const scrollTop = editor.getScrollTop();
@@ -377,6 +430,61 @@
       } catch (_) {
         return { ok: false, progress: 0 };
       }
+    }
+
+    function getPreviewLineMarkers(preview) {
+      try {
+        const nodes = Array.from(preview.querySelectorAll('[data-codoc-mdline]'));
+        const count = nodes.length;
+        if (state.previewLineMarkerCache && state.previewLineMarkerCache.count === count) {
+          const cached = state.previewLineMarkerCache;
+          const first = cached.els && cached.els[0];
+          if (first && first.isConnected && preview.contains(first)) {
+            return cached;
+          }
+          // DOM likely re-rendered; rebuild even if count is the same.
+        }
+
+        const lines = [];
+        const els = [];
+        for (const el of nodes) {
+          const raw = el.getAttribute('data-codoc-mdline');
+          const n = raw ? parseInt(raw, 10) : NaN;
+          if (!Number.isFinite(n)) continue;
+          lines.push(n);
+          els.push(el);
+        }
+
+        state.previewLineMarkerCache = { count, lines, els };
+        return state.previewLineMarkerCache;
+      } catch (_) {
+        return { count: 0, lines: [], els: [] };
+      }
+    }
+
+    function getPreviewTailAnchor(preview) {
+      try {
+        return preview.querySelector('[data-codoc-tail="1"]');
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function lastIndexLE(sortedNums, target) {
+      let lo = 0;
+      let hi = sortedNums.length - 1;
+      let ans = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        const v = sortedNums[mid];
+        if (v <= target) {
+          ans = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return ans;
     }
 
     function previewHeadingByTextOccurrence(preview, level, text, occurrenceIdx) {
@@ -455,7 +563,10 @@
           }
         }
         if (endTop == null) {
-          endTop = Math.max(0, preview.scrollHeight - preview.clientHeight);
+          const tail = getPreviewTailAnchor(preview);
+          endTop = tail
+            ? getOffsetTopInScrollContainer(preview, tail)
+            : Math.max(0, preview.scrollHeight - preview.clientHeight);
         }
 
         preview.scrollTop = startTop + (endTop - startTop) * clamp01(progress);
@@ -505,6 +616,73 @@
 
       state.syncing = true;
 
+      // Tail clamp: if editor is near bottom (including scrollBeyondLastLine slack),
+      // keep preview pinned to bottom until editor scrolls back into content.
+      try {
+        if (ed && isEditorNearBottom(ed)) {
+          p.scrollTop = Math.max(0, p.scrollHeight - p.clientHeight);
+          requestAnimationFrame(function () {
+            state.syncing = false;
+          });
+          return;
+        }
+      } catch (_) {
+        // ignore
+      }
+
+      // Best effort: line-marker sync (reduces drift for very long heading sections).
+      // If markers exist in preview, map Monaco visible top line -> nearest marker range.
+      try {
+        if (ed && typeof ed.getModel === 'function') {
+          const markers = getPreviewLineMarkers(p);
+          if (markers && markers.lines && markers.lines.length >= 2) {
+            const topLine = getEditorTopLine(ed);
+            const idx = lastIndexLE(markers.lines, topLine);
+            if (idx >= 0) {
+              // If we're in the last marker bucket, pin preview to bottom. This matches
+              // the "manual trailing heading" behavior (preview doesn't move in tail slack).
+              if (idx >= markers.lines.length - 1) {
+                const tail = getPreviewTailAnchor(p);
+                p.scrollTop = tail
+                  ? getOffsetTopInScrollContainer(p, tail)
+                  : Math.max(0, p.scrollHeight - p.clientHeight);
+                requestAnimationFrame(function () {
+                  state.syncing = false;
+                });
+                return;
+              }
+
+              const startLine = markers.lines[idx];
+              const nextLine = idx + 1 < markers.lines.length ? markers.lines[idx + 1] : null;
+              const startEl = markers.els[idx];
+              const nextEl = idx + 1 < markers.els.length ? markers.els[idx + 1] : null;
+
+              const startTop = startEl ? getOffsetTopInScrollContainer(p, startEl) : 0;
+              let endTop = null;
+              if (nextEl) {
+                endTop = getOffsetTopInScrollContainer(p, nextEl);
+              } else {
+                const tail = getPreviewTailAnchor(p);
+                endTop = tail
+                  ? getOffsetTopInScrollContainer(p, tail)
+                  : Math.max(0, p.scrollHeight - p.clientHeight);
+              }
+
+              const prog = computeSectionProgress(ed, startLine, nextLine, 0);
+              if (prog.ok) {
+                p.scrollTop = startTop + (endTop - startTop) * clamp01(prog.progress);
+                requestAnimationFrame(function () {
+                  state.syncing = false;
+                });
+                return;
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // ignore
+      }
+
       // Section-aware sync (#..####): within each heading section, map editor scroll
       // progress to preview scroll progress proportionally.
       try {
@@ -521,7 +699,7 @@
           const startLine = startHeading ? startHeading.lineNumber : 1;
           const nextLine = nextHeading ? nextHeading.lineNumber : null;
 
-          const prog = computeSectionProgress(ed, startLine, nextLine);
+          const prog = computeSectionProgress(ed, startLine, nextLine, 14);
           if (prog.ok) {
             const ok = scrollPreviewToSectionProgress(
               p,

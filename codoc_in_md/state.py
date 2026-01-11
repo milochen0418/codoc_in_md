@@ -18,8 +18,99 @@ from .embeds import (
 )
 
 
+def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
+    """Inject hidden line markers for more accurate scroll syncing.
+
+    We insert raw HTML spans that carry the original editor line number:
+      <span class="codoc-mdline" data-codoc-mdline="123" ...></span>
+
+    The preview scroll-sync JS can then map Monaco's visible top line to a
+    specific DOM anchor, preventing large drift when heading sections are long.
+
+    Markers are skipped inside fenced code blocks.
+    """
+
+    text = source or ""
+    if not text:
+        return text
+
+    every = max(2, int(every))
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+
+    in_code = False
+    fence_ch = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        import re
+
+        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        if not m:
+            return None
+        fence = m.group("fence")
+        return fence[0], len(fence)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        import re
+
+        if not ch or not ln:
+            return False
+        raw = line.rstrip("\n").rstrip("\r")
+        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+
+    def _marker(line_no: int) -> str:
+        # display:block + height:0 means it takes no visible space but has a stable offsetTop.
+        return (
+            f'<span class="codoc-mdline" data-codoc-mdline="{line_no}" '
+            'style="display:block;height:0;overflow:hidden;pointer-events:none"></span>\n'
+        )
+
+    import re
+
+    heading_re = re.compile(r"^\s{0,3}#{1,6}\s+.+")
+
+    last_marker_line: int | None = None
+
+    for i, line in enumerate(lines, start=1):
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                in_code = True
+                fence_ch, fence_len = opened
+            else:
+                if i == 1 or (i % every == 0) or heading_re.match(line):
+                    out.append(_marker(i))
+                    last_marker_line = i
+        else:
+            if _is_fence_close(line, fence_ch, fence_len):
+                in_code = False
+                fence_ch = ""
+                fence_len = 0
+
+        out.append(line)
+
+    # Always add a final marker near EOF so the last segment doesn't rely solely on scrollHeight.
+    last_line = len(lines)
+    if last_line > 0 and last_marker_line != last_line:
+        out.append(_marker(last_line))
+
+    # Add an invisible tail anchor to stabilize "last section" syncing.
+    # IMPORTANT: don't use h1/h2/... here because the preview uses a component_map
+    # that rebuilds heading elements and can drop raw attributes/styles.
+    # A plain div rendered via rehypeRaw preserves data attrs reliably.
+    # Give it some height to mimic the "extra slack" effect of a real trailing heading.
+    out.append(
+        '<div data-codoc-tail="1" aria-hidden="true" '
+        'style="height:40vh;opacity:0;overflow:hidden;pointer-events:none"></div>\n'
+    )
+
+    return "".join(out)
+
+
 def _render_markdown_source(source: str) -> str:
-    normalized = apply_hackmd_code_fence_options(source)
+    normalized = _inject_scroll_markers(source, every=5)
+    normalized = apply_hackmd_code_fence_options(normalized)
     normalized = apply_hackmd_typography(normalized)
     normalized = apply_hackmd_emojis(normalized)
     normalized = apply_hackmd_embeds(normalized)

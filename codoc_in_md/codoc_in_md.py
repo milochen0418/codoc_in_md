@@ -19,6 +19,7 @@ def editor_panel() -> rx.Component:
             on_change=EditorState.update_content,
             options={
                 "wordWrap": "on",
+                "scrollBeyondLastLine": True,
                 "minimap": {"enabled": False},
                 "lineNumbers": "off",
                 "glyphMargin": False,
