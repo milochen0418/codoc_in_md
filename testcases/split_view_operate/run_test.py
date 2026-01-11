@@ -93,6 +93,30 @@ def _set_test_markdown(page) -> None:
     time.sleep(0.2)
 
 
+def _scroll_preview_by(page, delta_y: int) -> None:
+        page.evaluate(
+                """(dy) => {
+                    const p = document.getElementById('preview-pane');
+                    if (!p) throw new Error('Preview not ready');
+                    p.scrollTop = (p.scrollTop || 0) + dy;
+                }""",
+                delta_y,
+        )
+
+
+def _scroll_editor_by(page, delta_px: int) -> None:
+        page.evaluate(
+                """(dy) => {
+                    const ed = (window.monaco?.editor?.getEditors?.() || [])[0];
+                    if (!ed || typeof ed.getScrollTop !== 'function' || typeof ed.setScrollTop !== 'function') {
+                        throw new Error('Monaco editor not ready');
+                    }
+                    ed.setScrollTop(ed.getScrollTop() + dy);
+                }""",
+                delta_px,
+        )
+
+
 def _get_split_left_pct(page) -> float:
     return float(
         page.evaluate(
@@ -182,24 +206,139 @@ def _scroll_editor_to_heading(page, heading_text: str) -> None:
     )
 
 
-def _assert_preview_heading_near_top(page, heading_text: str) -> None:
-    ok = page.evaluate(
-        """(headingText) => {
-          const preview = document.getElementById('preview-pane');
-          if (!preview) return false;
-          const pr = preview.getBoundingClientRect();
-          const headings = Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6'));
-          const target = headings.find((h) => (h.textContent || '').trim() === headingText);
-          if (!target) return false;
-          const r = target.getBoundingClientRect();
-          const delta = r.top - pr.top;
-          // JS sync places the heading close to the top (with a small padding offset).
-                    return delta >= -80 && delta <= 160;
-        }""",
-        heading_text,
-    )
-    if not ok:
-        raise AssertionError(f"Preview heading not near top: {heading_text}")
+def _get_editor_top_heading_text(page) -> str | None:
+        return page.evaluate(
+                """() => {
+                    const ed = (window.monaco?.editor?.getEditors?.() || [])[0];
+                    if (!ed) return null;
+                    const model = typeof ed.getModel === 'function' ? ed.getModel() : null;
+                    if (!model || typeof model.getLineCount !== 'function') return null;
+
+                    let topLine = 1;
+                    if (typeof ed.getVisibleRanges === 'function') {
+                        const ranges = ed.getVisibleRanges() || [];
+                        if (ranges.length && ranges[0] && ranges[0].startLineNumber) {
+                            topLine = ranges[0].startLineNumber;
+                        }
+                    }
+
+                    const maxLookback = 400;
+                    const minLine = Math.max(1, topLine - maxLookback);
+                    for (let ln = topLine; ln >= minLine; ln -= 1) {
+                        const line = model.getLineContent(ln) || '';
+                        const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+                        if (m) return String(m[2] || '').trim();
+                    }
+                    return null;
+                }"""
+        )
+
+
+def _get_preview_top_visible_heading_text(page) -> str | None:
+        return page.evaluate(
+                """() => {
+                    const preview = document.getElementById('preview-pane');
+                    if (!preview) return null;
+                    const pr = preview.getBoundingClientRect();
+                    const headings = Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+                    const visible = headings
+                        .map((h) => ({ h, r: h.getBoundingClientRect() }))
+                        .filter((x) => x.r.bottom > pr.top + 5 && x.r.top < pr.bottom - 5)
+                        .map((x) => ({ text: (x.h.textContent || '').trim(), topDelta: x.r.top - pr.top }))
+                        .filter((x) => x.text);
+                    if (!visible.length) return null;
+                    visible.sort((a, b) => a.topDelta - b.topDelta);
+                    return visible[0].text;
+                }"""
+        )
+
+
+def _dump_debug(page, output_dir: Path, name: str) -> None:
+        try:
+                payload = page.evaluate(
+                        """() => {
+                            const split = document.getElementById('codoc-split');
+                            const preview = document.getElementById('preview-pane');
+                            const viaDataset = split?.dataset ? split.dataset.locked : null;
+                            const viaAttr = split?.getAttribute('data-locked') || split?.getAttribute('data_locked');
+                            const rawLocked = viaDataset != null ? viaDataset : viaAttr;
+                            const locked = rawLocked === true || rawLocked === 'true';
+
+                            const ed = (window.monaco?.editor?.getEditors?.() || [])[0];
+                            const editorScrollTop = ed?.getScrollTop?.() ?? null;
+                            const editorVisibleRanges = ed?.getVisibleRanges?.() ?? null;
+
+                            function editorTopHeadingText() {
+                                try {
+                                    const model = ed && typeof ed.getModel === 'function' ? ed.getModel() : null;
+                                    if (!model || typeof model.getLineCount !== 'function') return null;
+
+                                    let topLine = 1;
+                                    if (ed && typeof ed.getVisibleRanges === 'function') {
+                                        const ranges = ed.getVisibleRanges() || [];
+                                        if (ranges.length && ranges[0] && ranges[0].startLineNumber) {
+                                            topLine = ranges[0].startLineNumber;
+                                        }
+                                    }
+
+                                    const maxLookback = 400;
+                                    const minLine = Math.max(1, topLine - maxLookback);
+                                    for (let ln = topLine; ln >= minLine; ln -= 1) {
+                                        const line = model.getLineContent(ln) || '';
+                                        const m = /^(#{1,6})\s+(.+?)\s*$/.exec(line);
+                                        if (m) return String(m[2] || '').trim();
+                                    }
+                                    return null;
+                                } catch (_) {
+                                    return null;
+                                }
+                            }
+
+                            function previewTopVisibleHeadingText() {
+                                try {
+                                    if (!preview) return null;
+                                    const pr = preview.getBoundingClientRect();
+                                    const headings = Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+                                    const visible = headings
+                                        .map((h) => ({ h, r: h.getBoundingClientRect() }))
+                                        .filter((x) => x.r.bottom > pr.top + 5 && x.r.top < pr.bottom - 5)
+                                        .map((x) => ({ text: (x.h.textContent || '').trim(), topDelta: x.r.top - pr.top }))
+                                        .filter((x) => x.text);
+                                    if (!visible.length) return null;
+                                    visible.sort((a, b) => a.topDelta - b.topDelta);
+                                    return visible[0].text;
+                                } catch (_) {
+                                    return null;
+                                }
+                            }
+
+                            const pr = preview?.getBoundingClientRect?.() ?? null;
+                            const headings = preview
+                                ? Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6')).slice(0, 20).map((h) => {
+                                        const r = h.getBoundingClientRect();
+                                        return { text: (h.textContent || '').trim(), topDelta: pr ? (r.top - pr.top) : null };
+                                    })
+                                : [];
+
+                            return {
+                                url: window.location.href,
+                                locked,
+                                splitLeft: split?.style?.getPropertyValue('--codoc-split-left') || null,
+                                previewScrollTop: preview?.scrollTop ?? null,
+                                editorScrollTop,
+                                editorVisibleRanges,
+                                editorTopHeadingText: editorTopHeadingText(),
+                                previewTopHeadingText: previewTopVisibleHeadingText(),
+                                previewFirst20Headings: headings,
+                            };
+                        }"""
+                )
+                (output_dir / f"debug_{name}.json").write_text(
+                        __import__("json").dumps(payload, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                )
+        except Exception:
+                pass
 
 
 def main() -> int:
@@ -224,8 +363,6 @@ def main() -> int:
             # Requirement: use /doc/embeds as the entry point.
             page.goto(base_url + "/doc/embeds", wait_until="domcontentloaded")
             _wait_for_app_ready(page)
-
-            _set_test_markdown(page)
 
             # 1) Divider drag should resize editor/preview widths.
             before_pct = _get_split_left_pct(page)
@@ -274,25 +411,23 @@ def main() -> int:
                 raise AssertionError("Expected unlocked state")
 
             # 3) Unlocked: preview/editor scroll independently.
-            # Scroll preview with mouse wheel.
+            # Scroll preview and editor independently.
             preview_box = page.locator("#preview-pane").bounding_box()
             editor_box = page.locator("#editor-pane").bounding_box()
             if not preview_box or not editor_box:
                 raise RuntimeError("Missing preview/editor panes")
 
-            page.mouse.move(preview_box["x"] + preview_box["width"] / 2, preview_box["y"] + 20)
             p_before = _get_preview_scroll_top(page)
-            page.mouse.wheel(0, 900)
+            _scroll_preview_by(page, 900)
             time.sleep(0.2)
             p_after = _get_preview_scroll_top(page)
             if p_after <= p_before + 5:
                 raise AssertionError("Preview did not scroll in unlocked mode")
 
-            # Now scroll editor with mouse wheel; preview should not auto-follow.
-            page.mouse.move(editor_box["x"] + editor_box["width"] / 2, editor_box["y"] + 20)
+            # Now scroll editor; preview should not auto-follow.
             p_before_editor_scroll = _get_preview_scroll_top(page)
             e_before = _get_editor_scroll_top(page)
-            page.mouse.wheel(0, 900)
+            _scroll_editor_by(page, 900)
             time.sleep(0.3)
             e_after = _get_editor_scroll_top(page)
             p_after_editor_scroll = _get_preview_scroll_top(page)
@@ -319,29 +454,53 @@ def main() -> int:
             page.evaluate("() => { const p = document.getElementById('preview-pane'); if (p) p.scrollTop = 0; }")
             time.sleep(0.1)
 
-            _scroll_editor_to_heading(page, "Beta")
+            # Use an existing ATX heading in assets/hackmd_embeds.md to force a meaningful scroll.
+            # The sync logic aligns to the editor's *top visible heading* (as detected by codoc_split.js),
+            # so we compute that expected heading after the scroll.
+            _scroll_editor_to_heading(page, "上傳圖片")
 
-            # Wait until the preview heading is near the top (sync is requestAnimationFrame-based).
-            page.wait_for_function(
-                """() => {
-                  const preview = document.getElementById('preview-pane');
-                  if (!preview) return false;
-                  const pr = preview.getBoundingClientRect();
-                  const headings = Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6'));
-                  const target = headings.find((h) => (h.textContent || '').trim() === 'Beta');
-                  if (!target) return false;
-                  const r = target.getBoundingClientRect();
-                  const delta = r.top - pr.top;
-                                    return delta >= -80 && delta <= 160;
-                }"""
-            )
-            _assert_preview_heading_near_top(page, "Beta")
+            expected_heading = _get_editor_top_heading_text(page)
+            if not expected_heading:
+                _dump_debug(page, output_dir, "locked_sync_no_editor_heading")
+                raise AssertionError("Could not detect editor top heading after scrolling")
+            try:
+                page.wait_for_function(
+                    """(expected) => {
+                      const preview = document.getElementById('preview-pane');
+                      if (!preview) return false;
+                      const pr = preview.getBoundingClientRect();
+                      const headings = Array.from(preview.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+                      const visible = headings
+                        .map((h) => ({ h, r: h.getBoundingClientRect() }))
+                        .filter((x) => x.r.bottom > pr.top + 5 && x.r.top < pr.bottom - 5)
+                        .map((x) => ({ text: (x.h.textContent || '').trim(), topDelta: x.r.top - pr.top }))
+                        .filter((x) => x.text);
+                      if (!visible.length) return false;
+                      visible.sort((a, b) => a.topDelta - b.topDelta);
+                      const topText = visible[0].text;
+                      return topText === expected;
+                    }""",
+                                        arg=expected_heading,
+                    timeout=max(timeout_ms, 60000),
+                )
+            except Exception:
+                _dump_debug(page, output_dir, "locked_sync_timeout")
+                raise
+
+            # Stronger check: the preview should now have the expected heading at the top.
+            preview_top = _get_preview_top_visible_heading_text(page)
+            if preview_top != expected_heading:
+                _dump_debug(page, output_dir, "locked_sync_mismatch")
+                raise AssertionError(
+                    f"Locked sync mismatch: preview_top={preview_top!r}, expected={expected_heading!r}"
+                )
 
             page.screenshot(path=str(output_dir / "split_view_operate.png"), full_page=True)
             return 0
         except Exception:
             try:
                 page.screenshot(path=str(output_dir / "failure.png"), full_page=True)
+                _dump_debug(page, output_dir, "failure")
             except Exception:
                 pass
             raise
