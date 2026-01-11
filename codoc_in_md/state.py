@@ -51,6 +51,13 @@ class DisplayUser(TypedDict):
 DOCUMENTS_STORE: dict[str, Document] = {}
 
 
+FIXTURE_DOCS: dict[str, str] = {
+    # Special fixture docs to validate renderer behavior.
+    "emojify": "hackmd_emojify_all_shortcodes.md",
+    "embeds": "hackmd_embeds.md",
+}
+
+
 class SharedState:
     """In-memory state for active users (ephemeral session tracking)."""
 
@@ -192,11 +199,11 @@ class EditorState(rx.State):
             else:
                 default_content = "# Start typing your masterpiece..."
 
-                # Special fixture doc to validate emojify shortcode coverage.
-                if doc_id == "emojify":
+                fixture_name = FIXTURE_DOCS.get(doc_id)
+                if fixture_name:
                     try:
                         repo_root = Path(__file__).resolve().parents[1]
-                        fixture_path = repo_root / "assets" / "hackmd_emojify_all_shortcodes.md"
+                        fixture_path = repo_root / "assets" / fixture_name
                         default_content = fixture_path.read_text(encoding="utf-8")
                     except Exception:
                         # Fall back to the normal default if fixture isn't available.
