@@ -3,6 +3,7 @@ from reflex_monaco import monaco
 from codoc_in_md.state import EditorState
 from codoc_in_md.components.header import header
 from codoc_in_md.components.sidebar import sidebar
+from codoc_in_md.components.markdown_clean import CleanMarkdown
 
 from codoc_in_md.embeds import register_backend_embed_routes
 
@@ -49,7 +50,7 @@ def preview_panel() -> rx.Component:
         return rx.fragment(children)
 
     return rx.el.div(
-        rx.markdown(
+        CleanMarkdown.create(
             EditorState.doc_content_rendered,
             component_map={
                 "h1": lambda node: rx.el.h1(
@@ -83,6 +84,36 @@ def preview_panel() -> rx.Component:
                 "blockquote": lambda node: rx.el.blockquote(
                     _as_fragment(_children_node(node)),
                     class_name="border-l-4 border-gray-300 pl-4 italic my-4",
+                ),
+                "table": lambda node: rx.el.div(
+                    rx.el.div(
+                        rx.el.table(
+                            _as_fragment(_children_node(node)),
+                            class_name="min-w-full border-collapse text-sm text-gray-800",
+                        ),
+                        class_name="overflow-x-auto",
+                    ),
+                    class_name="my-6 rounded-lg border border-gray-200 bg-white overflow-hidden",
+                ),
+                "thead": lambda node: rx.el.thead(
+                    _as_fragment(_children_node(node)),
+                    class_name="bg-gray-50 border-b border-gray-200",
+                ),
+                "tbody": lambda node: rx.el.tbody(
+                    _as_fragment(_children_node(node)),
+                    class_name="bg-white",
+                ),
+                "tr": lambda node: rx.el.tr(
+                    _as_fragment(_children_node(node)),
+                    class_name="border-b border-gray-200 last:border-b-0 even:bg-gray-50/40",
+                ),
+                "th": lambda node: rx.el.th(
+                    _as_fragment(_children_node(node)),
+                    class_name="px-4 py-3 text-xs font-semibold text-gray-700 border-r border-gray-200 last:border-r-0 whitespace-nowrap",
+                ),
+                "td": lambda node: rx.el.td(
+                    _as_fragment(_children_node(node)),
+                    class_name="px-4 py-3 align-top border-r border-gray-200 last:border-r-0 whitespace-normal break-words",
                 ),
             },
         ),
