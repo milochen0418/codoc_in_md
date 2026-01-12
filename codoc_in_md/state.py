@@ -70,6 +70,12 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
 
     heading_re = re.compile(r"^\s{0,3}#{1,6}\s+.+")
 
+    # Admonition-aware: do not inject markers inside HackMD-style admonitions.
+    # Those blocks are later transformed into raw HTML by `apply_hackmd_admonitions`,
+    # and any injected marker lines would become literal text inside the admonition.
+    admonition_start_re = re.compile(r"^\s*:::[a-zA-Z0-9_-]+.*$")
+    admonition_end_re = re.compile(r"^\s*:::\s*$")
+
     # Table-aware: do not inject raw HTML markers inside GFM tables.
     # Inserting a marker line between the header/delimiter/rows breaks table parsing.
     table_delim_re = re.compile(
@@ -89,6 +95,7 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
     last_marker_line: int | None = None
 
     in_table = False
+    in_admonition = False
 
     for idx, line in enumerate(lines):
         line_no = idx + 1
@@ -99,6 +106,14 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
                 in_code = True
                 fence_ch, fence_len = opened
             else:
+                # Track HackMD admonition fences.
+                if not in_admonition and admonition_start_re.match(line.rstrip("\r\n")):
+                    in_admonition = True
+                elif in_admonition and admonition_end_re.match(line.rstrip("\r\n")):
+                    # Keep the closing fence in the output, but stop skipping markers
+                    # after this line.
+                    pass
+
                 # Detect start/end of a table block.
                 if not in_table:
                     if idx + 1 < len(lines) and _is_table_header_line(lines[idx]) and _is_table_delim_line(lines[idx + 1]):
@@ -108,7 +123,11 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
                     if (not line.strip()) or ("|" not in line):
                         in_table = False
 
-                if (not in_table) and (line_no == 1 or (line_no % every == 0) or heading_re.match(line)):
+                if (
+                    (not in_table)
+                    and (not in_admonition)
+                    and (line_no == 1 or (line_no % every == 0) or heading_re.match(line))
+                ):
                     out.append(_marker(line_no))
                     last_marker_line = line_no
         else:
@@ -118,6 +137,9 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
                 fence_len = 0
 
         out.append(line)
+
+        if in_admonition and admonition_end_re.match(line.rstrip("\r\n")):
+            in_admonition = False
 
     # Always add a final marker near EOF so the last segment doesn't rely solely on scrollHeight.
     last_line = len(lines)
