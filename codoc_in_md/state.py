@@ -70,18 +70,47 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
 
     heading_re = re.compile(r"^\s{0,3}#{1,6}\s+.+")
 
+    # Table-aware: do not inject raw HTML markers inside GFM tables.
+    # Inserting a marker line between the header/delimiter/rows breaks table parsing.
+    table_delim_re = re.compile(
+        r"^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)+\|?\s*$"
+    )
+
+    def _is_table_header_line(line: str) -> bool:
+        s = line.strip()
+        if "|" not in s:
+            return False
+        # Require some non-syntax content.
+        return any(ch not in "|:- " for ch in s)
+
+    def _is_table_delim_line(line: str) -> bool:
+        return table_delim_re.match(line.rstrip("\r\n")) is not None
+
     last_marker_line: int | None = None
 
-    for i, line in enumerate(lines, start=1):
+    in_table = False
+
+    for idx, line in enumerate(lines):
+        line_no = idx + 1
+
         if not in_code:
             opened = _maybe_open_fence(line)
             if opened is not None:
                 in_code = True
                 fence_ch, fence_len = opened
             else:
-                if i == 1 or (i % every == 0) or heading_re.match(line):
-                    out.append(_marker(i))
-                    last_marker_line = i
+                # Detect start/end of a table block.
+                if not in_table:
+                    if idx + 1 < len(lines) and _is_table_header_line(lines[idx]) and _is_table_delim_line(lines[idx + 1]):
+                        in_table = True
+                else:
+                    # End table when we hit a blank line or a non-pipe line.
+                    if (not line.strip()) or ("|" not in line):
+                        in_table = False
+
+                if (not in_table) and (line_no == 1 or (line_no % every == 0) or heading_re.match(line)):
+                    out.append(_marker(line_no))
+                    last_marker_line = line_no
         else:
             if _is_fence_close(line, fence_ch, fence_len):
                 in_code = False

@@ -364,6 +364,15 @@ def main() -> int:
             page.goto(base_url + "/doc/embeds", wait_until="domcontentloaded")
             _wait_for_app_ready(page)
 
+                        # Sanity: ensure GFM tables render as actual <table> elements.
+                        page.wait_for_function(
+                                """() => {
+                                    const root = document.getElementById('preview-pane');
+                                    if (!root) return false;
+                                    return (root.querySelectorAll('table') || []).length > 0;
+                                }"""
+                        )
+
             # 1) Divider drag should resize editor/preview widths.
             before_pct = _get_split_left_pct(page)
 

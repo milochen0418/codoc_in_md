@@ -55,6 +55,17 @@ def main() -> int:
             # Preview should also be mounted.
             page.locator("#preview-pane").wait_for(state="visible")
 
+                        # Also validate the emojify fixture doc renders (no network dependency; just DOM).
+                        page.goto(base_url + "/doc/emojify", wait_until="domcontentloaded")
+                        page.locator("#preview-pane").wait_for(state="visible")
+                        page.wait_for_function(
+                                """() => {
+                                    const root = document.getElementById('preview-pane');
+                                    if (!root) return false;
+                                    return (root.querySelectorAll('img.emoji') || []).length > 0;
+                                }"""
+                        )
+
             # Give layout a moment to settle for screenshots.
             time.sleep(0.25)
 
