@@ -259,7 +259,44 @@ def _replace_emoji_shortcodes(text: str) -> str:
 
         return raw_token
 
-    return _EMOJI_SHORTCODE_RE.sub(_replace_token, text)
+    # IMPORTANT: Only replace in text nodes, not inside raw HTML tags.
+    # The markdown pipeline intentionally injects raw HTML (e.g. <img class="emoji" alt=":bulb:" ...>).
+    # If we run shortcode replacement across the whole string, we may replace the
+    # literal ":bulb:" inside an attribute value and produce invalid nested HTML.
+
+    def _replace_outside_html_tags(s: str) -> str:
+        out: list[str] = []
+        i = 0
+        start = 0
+        in_tag = False
+
+        while i < len(s):
+            ch = s[i]
+
+            if not in_tag and ch == "<":
+                nxt = s[i + 1] if i + 1 < len(s) else ""
+                # Heuristic: treat as an HTML tag only when it looks like one.
+                if nxt.isalpha() or nxt in "/!?":
+                    out.append(_EMOJI_SHORTCODE_RE.sub(_replace_token, s[start:i]))
+                    in_tag = True
+                    start = i
+            elif in_tag and ch == ">":
+                out.append(s[start : i + 1])
+                in_tag = False
+                start = i + 1
+
+            i += 1
+
+        # Flush remainder.
+        tail = s[start:]
+        if in_tag:
+            out.append(tail)
+        else:
+            out.append(_EMOJI_SHORTCODE_RE.sub(_replace_token, tail))
+
+        return "".join(out)
+
+    return _replace_outside_html_tags(text)
 
 
 _HACKMD_IMG_SIZE_RE = re.compile(
