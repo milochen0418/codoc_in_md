@@ -98,6 +98,12 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
 
     in_table = False
     in_admonition = False
+    in_math_block = False
+
+    # Math-aware: do not inject raw HTML markers inside display-math fences.
+    # Reflex's markdown uses remark-math + rehype-katex. Injecting HTML marker
+    # lines between `$$` fences breaks math parsing and renders as plain text.
+    math_fence_re = re.compile(r"^\s*\$\$\s*$")
 
     for idx, line in enumerate(lines):
         line_no = idx + 1
@@ -128,6 +134,7 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
                 if (
                     (not in_table)
                     and (not in_admonition)
+                    and (not in_math_block)
                     and (line_no == 1 or (line_no % every == 0) or heading_re.match(line))
                 ):
                     out.append(_marker(line_no))
@@ -142,6 +149,10 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
 
         if in_admonition and admonition_end_re.match(line.rstrip("\r\n")):
             in_admonition = False
+
+        # Toggle math-block state only when not inside fenced code.
+        if (not in_code) and math_fence_re.match(line.rstrip("\r\n")):
+            in_math_block = not in_math_block
 
     # Always add a final marker near EOF so the last segment doesn't rely solely on scrollHeight.
     last_line = len(lines)
