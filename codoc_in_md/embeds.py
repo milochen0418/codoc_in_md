@@ -235,7 +235,17 @@ def _replace_emoji_shortcodes(text: str) -> str:
         if m_flag:
             return _flag_from_code(m_flag.group("cc"))
 
-        # 3) Unicode alias via python-emoji.
+        # 3) Prefer emojify.js image if the shortcode exists there.
+        # HackMD/CodiMD uses emojify.js images for shortcodes; using Unicode here
+        # makes preview diverge from HackMD and breaks DOM-based tests.
+        names = _emojify_basic_names()
+        if raw_name in names:
+            return _emoji_img_html(raw_name)
+        alt = raw_name.replace("_", "-")
+        if alt in names:
+            return _emoji_img_html(alt)
+
+        # 4) Unicode alias via python-emoji (best effort fallback).
         if emoji is not None:
             normalized = raw_name.replace("-", "_")
             if normalized.startswith("female_"):
@@ -246,14 +256,6 @@ def _replace_emoji_shortcodes(text: str) -> str:
             unicode_candidate = emoji.emojize(f":{normalized}:", language="alias")
             if unicode_candidate != f":{normalized}:":
                 return unicode_candidate
-
-        # 4) Fallback to emojify.js image if the shortcode exists there.
-        names = _emojify_basic_names()
-        if raw_name in names:
-            return _emoji_img_html(raw_name)
-        alt = raw_name.replace("_", "-")
-        if alt in names:
-            return _emoji_img_html(alt)
 
         return raw_token
 

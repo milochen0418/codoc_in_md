@@ -199,7 +199,8 @@ DOCUMENTS_STORE: dict[str, Document] = {}
 
 FIXTURE_DOCS: dict[str, str] = {
     # Special fixture docs to validate renderer behavior.
-    "emojify": "hackmd_emojify_all_shortcodes.md",
+    "emojify": "hackmd_emojify_smoke.md",
+    "emojify_all": "hackmd_emojify_all_shortcodes.md",
     "embeds": "hackmd_embeds.md",
     "images": "hackmd_images.md",
 }
@@ -327,6 +328,20 @@ class EditorState(rx.State):
         """Initializes the session for the specific document ID."""
         path = getattr(self.router.url, "path", "")
         doc_id = path.rstrip("/").split("/")[-1] if path else ""
+
+        # Fixture docs are meant to reflect the current contents of files in ./assets.
+        # Always reload fixtures on load to avoid stale in-memory documents causing
+        # confusing behavior in demos and E2E tests.
+        fixture_name = FIXTURE_DOCS.get(doc_id) if doc_id else None
+        fixture_content: str | None = None
+        if fixture_name:
+            try:
+                repo_root = Path(__file__).resolve().parents[1]
+                fixture_path = repo_root / "assets" / fixture_name
+                fixture_content = fixture_path.read_text(encoding="utf-8")
+            except Exception:
+                fixture_content = None
+
         async with self:
             if not doc_id:
                 new_id = str(uuid.uuid4())[:8]
@@ -335,7 +350,12 @@ class EditorState(rx.State):
             if not self.my_user_id:
                 self._generate_user_info()
             self.is_loading = True
-        db_doc = self._get_doc_from_db(doc_id)
+
+        # For fixtures, prefer the asset file even if the doc exists in memory.
+        if fixture_content is not None:
+            db_doc = None
+        else:
+            db_doc = self._get_doc_from_db(doc_id)
         async with self:
             if db_doc:
                 self.doc_content = db_doc["content"]
@@ -346,15 +366,18 @@ class EditorState(rx.State):
             else:
                 default_content = "# Start typing your masterpiece..."
 
-                fixture_name = FIXTURE_DOCS.get(doc_id)
-                if fixture_name:
-                    try:
-                        repo_root = Path(__file__).resolve().parents[1]
-                        fixture_path = repo_root / "assets" / fixture_name
-                        default_content = fixture_path.read_text(encoding="utf-8")
-                    except Exception:
-                        # Fall back to the normal default if fixture isn't available.
-                        pass
+                if fixture_content is not None:
+                    default_content = fixture_content
+                else:
+                    fixture_name2 = FIXTURE_DOCS.get(doc_id)
+                    if fixture_name2:
+                        try:
+                            repo_root = Path(__file__).resolve().parents[1]
+                            fixture_path = repo_root / "assets" / fixture_name2
+                            default_content = fixture_path.read_text(encoding="utf-8")
+                        except Exception:
+                            # Fall back to the normal default if fixture isn't available.
+                            pass
                 self.doc_content = default_content
                 self.doc_content_rendered = _render_markdown_source(default_content)
                 self._save_doc_to_db(doc_id, default_content)

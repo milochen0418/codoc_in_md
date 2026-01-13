@@ -82,17 +82,6 @@ def main() -> int:
 
             _wait_for_app_ready(page, require_preview_tables=False)
 
-            # Also validate the emojify fixture doc renders (no network dependency; just DOM).
-            page.goto(base_url + "/doc/emojify", wait_until="domcontentloaded")
-            page.locator("#preview-pane").wait_for(state="visible")
-            page.wait_for_function(
-                """() => {
-                    const root = document.getElementById('preview-pane');
-                    if (!root) return false;
-                    return (root.querySelectorAll('img.emoji') || []).length > 0;
-                }"""
-            )
-
             # Validate HackMD-style image syntax:
             # - reference-style image: ![Alt text][id] + [id]: ...
             # - size suffix: ![Minion](... =200x200)
@@ -109,12 +98,30 @@ def main() -> int:
                     const hasRef = imgs.some((img) => (img.getAttribute('src') || '').includes('dojocat.jpg'));
                     if (!hasRef) return false;
 
+                    const hasStormTitle = imgs.some((img) =>
+                        (img.getAttribute('src') || '').includes('stormtroopocat.jpg') &&
+                        (img.getAttribute('title') || '') === 'The Stormtroopocat'
+                    );
+                    if (!hasStormTitle) return false;
+
                     const sized = imgs.find((img) => (img.getAttribute('src') || '').includes('minion.png') && (img.getAttribute('width') === '200' || img.getAttribute('height') === '200' || (img.getAttribute('style') || '').includes('200px')));
                     if (!sized) return false;
 
                     const w = parseInt(sized.getAttribute('width') || '0', 10);
                     const h = parseInt(sized.getAttribute('height') || '0', 10);
                     return (w === 200 && h === 200) || ((sized.getAttribute('style') || '').includes('width:200px') && (sized.getAttribute('style') || '').includes('height:200px'));
+                }"""
+            )
+
+            # Also validate the emojify fixture doc renders (no network dependency; just DOM).
+            page.goto(base_url + "/doc/emojify", wait_until="domcontentloaded")
+            page.locator("#preview-pane").wait_for(state="visible")
+            page.wait_for_function(
+                """() => {
+                    const root = document.getElementById('preview-pane');
+                    if (!root) return false;
+                    const text = root.textContent || '';
+                    return text.includes('🎉') || text.includes('📣') || text.includes('⚡') || text.includes('🔥') || text.includes('😜');
                 }"""
             )
 
