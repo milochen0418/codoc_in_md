@@ -1002,6 +1002,22 @@ def apply_hackmd_typography(markdown_text: str) -> str:
         if not segment:
             return segment
 
+        # Preserve raw HTML tags exactly; typography (especially smart quotes)
+        # must not modify attribute quotes inside <...>.
+        html_tag_re = re.compile(r"</?[A-Za-z][^>]*?>")
+
+        def _apply_typography_preserving_html(s: str) -> str:
+            if not s:
+                return s
+            out: list[str] = []
+            pos2 = 0
+            for m2 in html_tag_re.finditer(s):
+                out.append(_apply_typography_to_text(s[pos2 : m2.start()]))
+                out.append(m2.group(0))
+                pos2 = m2.end()
+            out.append(_apply_typography_to_text(s[pos2:]))
+            return "".join(out)
+
         # Do not transform inside embed directives.
         parts: list[str] = []
         pos = 0
@@ -1029,14 +1045,14 @@ def apply_hackmd_typography(markdown_text: str) -> str:
                 while j < len(buf):
                     tick = buf.find("`", j)
                     if tick == -1:
-                        out_parts.append(_apply_typography_to_text(buf[j:]))
+                        out_parts.append(_apply_typography_preserving_html(buf[j:]))
                         break
                     # Find matching tick.
                     end = buf.find("`", tick + 1)
                     if end == -1:
-                        out_parts.append(_apply_typography_to_text(buf[j:]))
+                        out_parts.append(_apply_typography_preserving_html(buf[j:]))
                         break
-                    out_parts.append(_apply_typography_to_text(buf[j:tick]))
+                    out_parts.append(_apply_typography_preserving_html(buf[j:tick]))
                     out_parts.append(buf[tick : end + 1])
                     j = end + 1
         return ""
@@ -1081,6 +1097,111 @@ def apply_hackmd_typography(markdown_text: str) -> str:
 
     _flush_buf()
     return "".join(out_parts)
+
+
+_FA_I_TAG_RE = re.compile(
+    r"<i(?P<before>[^>]*?)\sclass=(?P<q>[\"\'])(?P<cls>[^\"\']*\bfa\b[^\"\']*)(?P=q)(?P<after>[^>]*)>",
+    flags=re.IGNORECASE,
+)
+
+_FA_I_ELEMENT_RE = re.compile(
+    r"<i(?P<before>[^>]*?)\sclass=(?P<q>[\"\'])(?P<cls>[^\"\']*\bfa\b[^\"\']*)(?P=q)(?P<after>[^>]*)>\s*</i>",
+    flags=re.IGNORECASE,
+)
+
+
+def apply_hackmd_fontawesome_icons(markdown_text: str) -> str:
+    """Preserve HackMD-style Font Awesome icon info through sanitization.
+
+    Some Markdown renderers sanitize raw HTML and strip the `class` attribute,
+    which breaks icons like:
+      <i class="fa fa-file-text"></i>
+
+    We keep the original class list in a data attribute (`data-codoc-fa-class`), which
+    is typically allowed, and a small client script can re-apply the class.
+
+    This transform skips fenced code blocks.
+    """
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n?$", line)
+        if not m:
+            return None
+        f = m.group("fence")
+        return f[0], len(f)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*\n?$", line) is not None
+
+    def _element_repl(m: re.Match[str]) -> str:
+        before = m.group("before")
+        q = m.group("q")
+        cls = (m.group("cls") or "").strip()
+        after = m.group("after")
+
+        safe_cls = _escape_attr(cls)
+        already_annotated = re.search(
+            r"\bdata-codoc-fa-class\s*=", before + after, flags=re.IGNORECASE
+        )
+
+        # Convert <i> to <span> so it survives stricter sanitizers.
+        # Font Awesome targets `.fa` class on any element.
+        data_attr = "" if already_annotated else f' data-codoc-fa-class="{safe_cls}"'
+        return f"<span{before} class={q}{cls}{q}{after}{data_attr}></span>"
+
+    def _tag_repl(m: re.Match[str]) -> str:
+        before = m.group("before")
+        q = m.group("q")
+        cls = (m.group("cls") or "").strip()
+        after = m.group("after")
+
+        # If already annotated, do nothing.
+        if re.search(r"\bdata-codoc-fa-class\s*=", before + after, flags=re.IGNORECASE):
+            return m.group(0)
+
+        safe_cls = _escape_attr(cls)
+        return f"<i{before} class={q}{cls}{q}{after} data-codoc-fa-class=\"{safe_cls}\">"
+
+    while i < len(lines):
+        line = lines[i]
+
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                fence_char, fence_len = opened
+                in_code = True
+                out.append(line)
+                i += 1
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+            out.append(line)
+            i += 1
+            continue
+
+        # Prefer rewriting full icon elements (<i ...></i>) into <span ...></span>.
+        s = _FA_I_ELEMENT_RE.sub(_element_repl, line)
+        # Fallback: annotate opening tags so a client script can restore class.
+        s = _FA_I_TAG_RE.sub(_tag_repl, s)
+        out.append(s)
+        i += 1
+
+    return "".join(out)
 
 
 _CODE_FENCE_RE = re.compile(

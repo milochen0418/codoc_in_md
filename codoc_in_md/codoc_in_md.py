@@ -222,6 +222,13 @@ app = rx.App(
     theme=rx.theme(appearance="light"),
     head_components=[
         rx.el.script(src="/codoc_split.js", defer=True),
+        rx.el.script(src="/fontawesome_fix.js", defer=True),
+        # HackMD commonly uses Font Awesome 4 markup like: <i class="fa fa-...">.
+        # Load FA so those icons render in the preview.
+        rx.el.link(
+            rel="stylesheet",
+            href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css",
+        ),
         rx.el.link(rel="preconnect", href="https://fonts.googleapis.com"),
         rx.el.link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         rx.el.link(
