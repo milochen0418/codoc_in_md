@@ -1218,6 +1218,31 @@ def apply_hackmd_typography(markdown_text: str) -> str:
         )
         _REF_DEF_LINE_RE = re.compile(r"(?m)^\s*\[[^\]]+\]\s*:\s*[^\n]*$")
 
+        def _apply_typography_preserving_inline_links_and_images(s: str) -> str:
+            """Apply typography while preserving inline link/image destinations.
+
+            This prevents smart-quote conversion from breaking markdown parsing inside
+            `( ... )` link/image syntax, including optional titles.
+            """
+
+            if not s:
+                return s
+
+            out2: list[str] = []
+            pos4 = 0
+            for m4 in _INLINE_LINK_OR_IMAGE_RE.finditer(s):
+                before = s[pos4 : m4.start()]
+                if before:
+                    out2.append(_apply_typography_preserving_html(before))
+
+                label = m4.group("label")
+                dest = m4.group("dest")
+                out2.append(label + "(" + _normalize_curly_quotes_to_straight(dest) + ")")
+                pos4 = m4.end()
+
+            out2.append(_apply_typography_preserving_html(s[pos4:]))
+            return "".join(out2)
+
         def _apply_typography_preserving_md_syntax(s: str) -> str:
             if not s:
                 return s
@@ -1229,7 +1254,7 @@ def apply_hackmd_typography(markdown_text: str) -> str:
             for m3 in _REF_DEF_LINE_RE.finditer(s):
                 before = s[pos3 : m3.start()]
                 if before:
-                    parts_out.append(_apply_typography_preserving_html(before))
+                    parts_out.append(_apply_typography_preserving_inline_links_and_images(before))
 
                 raw_line = m3.group(0)
                 parts_out.append(_normalize_curly_quotes_to_straight(raw_line))
@@ -1239,19 +1264,8 @@ def apply_hackmd_typography(markdown_text: str) -> str:
             if not tail:
                 return "".join(parts_out)
 
-            # Within remaining text, protect inline link/image destinations.
-            pos4 = 0
-            for m4 in _INLINE_LINK_OR_IMAGE_RE.finditer(tail):
-                before = tail[pos4 : m4.start()]
-                if before:
-                    parts_out.append(_apply_typography_preserving_html(before))
-
-                label = m4.group("label")
-                dest = m4.group("dest")
-                parts_out.append(label + "(" + _normalize_curly_quotes_to_straight(dest) + ")")
-                pos4 = m4.end()
-
-            parts_out.append(_apply_typography_preserving_html(tail[pos4:]))
+            # Within remaining text, also protect inline link/image destinations.
+            parts_out.append(_apply_typography_preserving_inline_links_and_images(tail))
             return "".join(parts_out)
 
         # Do not transform inside embed directives.
