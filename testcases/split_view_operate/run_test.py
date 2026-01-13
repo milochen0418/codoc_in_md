@@ -13,7 +13,7 @@ def env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _wait_for_app_ready(page) -> None:
+def _wait_for_app_ready(page, *, require_preview_tables: bool = False) -> None:
     # The app may redirect; wait for stable UI.
     page.get_by_role("heading", name="Collaborative Doc").wait_for()
     page.locator('button[title="Split View"]').wait_for()
@@ -40,6 +40,15 @@ def _wait_for_app_ready(page) -> None:
           return hasScrollable && monacoReady && !!split && !!divider && !!preview;
         }"""
     )
+
+    if require_preview_tables:
+        page.wait_for_function(
+            """() => {
+                const root = document.getElementById('preview-pane');
+                if (!root) return false;
+                return (root.querySelectorAll('table') || []).length > 0;
+            }"""
+        )
 
     # Give layout/JS a moment to settle.
     time.sleep(0.25)
@@ -189,8 +198,8 @@ def _scroll_editor_to_heading(page, heading_text: str) -> None:
             }
           }
           if (!headingLine) throw new Error(`Heading not found: ${wanted}`);
-          // Put a line a bit below the heading near the top of the viewport.
-          const target = Math.min(lineCount, headingLine + 4);
+                    // Bring the heading itself near the top so split-sync resolves to this heading.
+                    const target = headingLine;
                     // Force an actual scroll so onDidScrollChange fires (needed for sync).
                     if (typeof ed.getTopForLineNumber === 'function' && typeof ed.setScrollTop === 'function') {
                         const topPx = ed.getTopForLineNumber(target);
@@ -362,16 +371,7 @@ def main() -> int:
         try:
             # Requirement: use /doc/embeds as the entry point.
             page.goto(base_url + "/doc/embeds", wait_until="domcontentloaded")
-            _wait_for_app_ready(page)
-
-                        # Sanity: ensure GFM tables render as actual <table> elements.
-                        page.wait_for_function(
-                                """() => {
-                                    const root = document.getElementById('preview-pane');
-                                    if (!root) return false;
-                                    return (root.querySelectorAll('table') || []).length > 0;
-                                }"""
-                        )
+            _wait_for_app_ready(page, require_preview_tables=True)
 
             # 1) Divider drag should resize editor/preview widths.
             before_pct = _get_split_left_pct(page)
