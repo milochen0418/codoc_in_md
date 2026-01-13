@@ -14,6 +14,7 @@ from .embeds import (
     apply_hackmd_admonitions,
     apply_hackmd_embeds,
     apply_hackmd_emojis,
+    apply_hackmd_image_sizes,
     apply_hackmd_fontawesome_icons,
     apply_hackmd_typography,
 )
@@ -166,6 +167,7 @@ def _render_markdown_source(source: str) -> str:
     normalized = apply_hackmd_typography(normalized)
     normalized = apply_hackmd_fontawesome_icons(normalized)
     normalized = apply_hackmd_emojis(normalized)
+    normalized = apply_hackmd_image_sizes(normalized)
     normalized = apply_hackmd_embeds(normalized)
     normalized = apply_hackmd_admonitions(normalized)
     normalized = apply_hackmd_blockquote_labels(normalized)
@@ -199,6 +201,7 @@ FIXTURE_DOCS: dict[str, str] = {
     # Special fixture docs to validate renderer behavior.
     "emojify": "hackmd_emojify_all_shortcodes.md",
     "embeds": "hackmd_embeds.md",
+    "images": "hackmd_images.md",
 }
 
 

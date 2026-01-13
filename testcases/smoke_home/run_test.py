@@ -93,6 +93,31 @@ def main() -> int:
                 }"""
             )
 
+            # Validate HackMD-style image syntax:
+            # - reference-style image: ![Alt text][id] + [id]: ...
+            # - size suffix: ![Minion](... =200x200)
+            page.goto(base_url + "/doc/images", wait_until="domcontentloaded")
+            page.locator("#preview-pane").wait_for(state="visible")
+            page.wait_for_function(
+                """() => {
+                    const root = document.getElementById('preview-pane');
+                    if (!root) return false;
+
+                    const imgs = Array.from(root.querySelectorAll('img'));
+                    if (imgs.length < 3) return false;
+
+                    const hasRef = imgs.some((img) => (img.getAttribute('src') || '').includes('dojocat.jpg'));
+                    if (!hasRef) return false;
+
+                    const sized = imgs.find((img) => (img.getAttribute('src') || '').includes('minion.png') && (img.getAttribute('width') === '200' || img.getAttribute('height') === '200' || (img.getAttribute('style') || '').includes('200px')));
+                    if (!sized) return false;
+
+                    const w = parseInt(sized.getAttribute('width') || '0', 10);
+                    const h = parseInt(sized.getAttribute('height') || '0', 10);
+                    return (w === 200 && h === 200) || ((sized.getAttribute('style') || '').includes('width:200px') && (sized.getAttribute('style') || '').includes('height:200px'));
+                }"""
+            )
+
             # Give layout a moment to settle for screenshots.
             time.sleep(0.25)
 

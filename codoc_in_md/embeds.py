@@ -260,6 +260,179 @@ def _replace_emoji_shortcodes(text: str) -> str:
     return _EMOJI_SHORTCODE_RE.sub(_replace_token, text)
 
 
+_HACKMD_IMG_SIZE_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\]\((?P<inside>[^\)]*?\s=\s*\d*\s*x\s*\d*[^\)]*?)\)",
+    re.IGNORECASE,
+)
+
+
+def _parse_hackmd_img_size(inside: str) -> tuple[str, str | None, int | None, int | None] | None:
+    """Parse HackMD image destination with optional title and size.
+
+    Supports forms like:
+      url =200x200
+      url "title" =200x
+      <url> =x200
+
+    Returns (url, title, width_px, height_px) or None if not parseable.
+    """
+
+    s = (inside or "").strip()
+    if not s:
+        return None
+
+    # URL: first token (or <...> form).
+    url = ""
+    rest = ""
+    if s.startswith("<"):
+        end = s.find(">")
+        if end <= 1:
+            return None
+        url = s[1:end].strip()
+        rest = s[end + 1 :].strip()
+    else:
+        m = re.match(r"^(?P<url>\S+)(?P<rest>.*)$", s)
+        if not m:
+            return None
+        url = (m.group("url") or "").strip()
+        rest = (m.group("rest") or "").strip()
+
+    if not url:
+        return None
+
+    # Size token can appear anywhere in the remaining text.
+    m_size = re.search(
+        r"(?:^|\s)=\s*(?P<w>\d*)\s*x\s*(?P<h>\d*)(?=\s|$)",
+        rest,
+        flags=re.IGNORECASE,
+    )
+    if not m_size:
+        return None
+
+    raw_w = (m_size.group("w") or "").strip()
+    raw_h = (m_size.group("h") or "").strip()
+    if not raw_w and not raw_h:
+        return None
+
+    width = int(raw_w) if raw_w.isdigit() else None
+    height = int(raw_h) if raw_h.isdigit() else None
+
+    # Remove the size token from the rest.
+    rest_wo_size = (rest[: m_size.start()] + rest[m_size.end() :]).strip()
+
+    # Optional title in quotes (single/double, including curly). Prefer the first quoted segment.
+    title: str | None = None
+    m_title = re.search(
+        r'(?:"(?P<t1>.*?)"|\'(?P<t2>.*?)\'|\u201c(?P<t3>.*?)\u201d)',
+        rest_wo_size,
+    )
+    if m_title:
+        title = m_title.group("t1") or m_title.group("t2") or m_title.group("t3")
+    elif rest_wo_size:
+        # If something remains but isn't quoted, treat it as not-a-title.
+        title = None
+
+    return url, title, width, height
+
+
+def apply_hackmd_image_sizes(markdown_text: str) -> str:
+    """Support HackMD-style image sizing: `![alt](url =200x200)`.
+
+    This is not CommonMark; we rewrite it into raw HTML `<img ...>` so react-markdown
+    can render it while preserving sizes.
+
+    Skips fenced code blocks and inline code spans.
+    """
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+    i = 0
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n?$", line)
+        if not m:
+            return None
+        f = m.group("fence")
+        return f[0], len(f)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*\n?$", line) is not None
+
+    inline_code_re = re.compile(r"(`+)([^`]*?)\1")
+
+    def _replace_in_text(buf: str) -> str:
+        def _repl(m: re.Match[str]) -> str:
+            alt = m.group("alt") or ""
+            inside = m.group("inside") or ""
+            parsed = _parse_hackmd_img_size(inside)
+            if parsed is None:
+                return m.group(0)
+            url, title, width, height = parsed
+
+            safe_url = _escape_attr(url)
+            safe_alt = _escape_attr(alt)
+            attrs = [f'src="{safe_url}"', f'alt="{safe_alt}"', 'loading="lazy"']
+            if title:
+                attrs.append(f'title="{_escape_attr(title)}"')
+
+            style_parts = ["max-width:100%"]
+            if width is not None and width > 0:
+                attrs.append(f'width="{width}"')
+                style_parts.append(f"width:{width}px")
+            if height is not None and height > 0:
+                attrs.append(f'height="{height}"')
+                style_parts.append(f"height:{height}px")
+            if height is None:
+                # Preserve aspect ratio unless explicitly overridden.
+                style_parts.append("height:auto")
+
+            attrs.append(f'style="{_escape_attr(";".join(style_parts))}"')
+            return f"<img {' '.join(attrs)} />"
+
+        return _HACKMD_IMG_SIZE_RE.sub(_repl, buf)
+
+    while i < len(lines):
+        line = lines[i]
+
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                fence_char, fence_len = opened
+                in_code = True
+                out.append(line)
+                i += 1
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+            out.append(line)
+            i += 1
+            continue
+
+        # Replace outside inline code spans.
+        replaced: list[str] = []
+        last = 0
+        for m in inline_code_re.finditer(line):
+            replaced.append(_replace_in_text(line[last : m.start()]))
+            replaced.append(line[m.start() : m.end()])
+            last = m.end()
+        replaced.append(_replace_in_text(line[last:]))
+        out.append("".join(replaced))
+        i += 1
+
+    return "".join(out)
+
+
 def apply_hackmd_emojis(markdown_text: str) -> str:
     """Apply emoji shortcode replacement globally, skipping fenced code blocks."""
 
@@ -902,6 +1075,24 @@ def _apply_typography_to_text(text: str) -> str:
     return s
 
 
+def _normalize_curly_quotes_to_straight(text: str) -> str:
+    """Convert curly quotes (smart quotes) to straight quotes.
+
+    HackMD content sometimes contains typographic quotes inside Markdown link/image
+    titles (e.g. `![alt](url ”title”)`). CommonMark parsers generally only accept
+    straight quotes for titles, so we normalize them in markdown syntax regions.
+    """
+
+    if not text:
+        return text
+    return (
+        text.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+    )
+
+
 def apply_hackmd_typography(markdown_text: str) -> str:
     """Apply HackMD-like typography substitutions to markdown.
 
@@ -1018,6 +1209,49 @@ def apply_hackmd_typography(markdown_text: str) -> str:
             out.append(_apply_typography_to_text(s[pos2:]))
             return "".join(out)
 
+        # Markdown link/image aware: avoid transforming destinations/titles.
+        # Smart-quote conversion inside `( ... )` breaks markdown parsing.
+        _INLINE_LINK_OR_IMAGE_RE = re.compile(
+            r"(?P<label>!?\[[^\]]*\])\((?P<dest>[^\)\n]*)\)"
+        )
+        _REF_DEF_LINE_RE = re.compile(r"(?m)^\s*\[[^\]]+\]\s*:\s*[^\n]*$")
+
+        def _apply_typography_preserving_md_syntax(s: str) -> str:
+            if not s:
+                return s
+
+            parts_out: list[str] = []
+            pos3 = 0
+
+            # Protect reference definition lines first.
+            for m3 in _REF_DEF_LINE_RE.finditer(s):
+                before = s[pos3 : m3.start()]
+                if before:
+                    parts_out.append(_apply_typography_preserving_html(before))
+
+                raw_line = m3.group(0)
+                parts_out.append(_normalize_curly_quotes_to_straight(raw_line))
+                pos3 = m3.end()
+
+            tail = s[pos3:]
+            if not tail:
+                return "".join(parts_out)
+
+            # Within remaining text, protect inline link/image destinations.
+            pos4 = 0
+            for m4 in _INLINE_LINK_OR_IMAGE_RE.finditer(tail):
+                before = tail[pos4 : m4.start()]
+                if before:
+                    parts_out.append(_apply_typography_preserving_html(before))
+
+                label = m4.group("label")
+                dest = m4.group("dest")
+                parts_out.append(label + "(" + _normalize_curly_quotes_to_straight(dest) + ")")
+                pos4 = m4.end()
+
+            parts_out.append(_apply_typography_preserving_html(tail[pos4:]))
+            return "".join(parts_out)
+
         # Do not transform inside embed directives.
         parts: list[str] = []
         pos = 0
@@ -1045,14 +1279,14 @@ def apply_hackmd_typography(markdown_text: str) -> str:
                 while j < len(buf):
                     tick = buf.find("`", j)
                     if tick == -1:
-                        out_parts.append(_apply_typography_preserving_html(buf[j:]))
+                        out_parts.append(_apply_typography_preserving_md_syntax(buf[j:]))
                         break
                     # Find matching tick.
                     end = buf.find("`", tick + 1)
                     if end == -1:
-                        out_parts.append(_apply_typography_preserving_html(buf[j:]))
+                        out_parts.append(_apply_typography_preserving_md_syntax(buf[j:]))
                         break
-                    out_parts.append(_apply_typography_preserving_html(buf[j:tick]))
+                    out_parts.append(_apply_typography_preserving_md_syntax(buf[j:tick]))
                     out_parts.append(buf[tick : end + 1])
                     j = end + 1
         return ""
