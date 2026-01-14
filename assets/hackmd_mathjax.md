@@ -1,6 +1,6 @@
 
 
-Ref: https://nathanlesage.github.io/katex-online-editor/ 
+Ref: https://nathanlesage.github.io/katex-online-editor/
 
 # MathJax (KaTeX) 測試文件
 
@@ -109,4 +109,27 @@ $$
 
 $$
 	ext{==mark== ++insert++ ^sup^ ~sub~ API ... a--b}
+$$
+
+
+## Extremely Edge Case 
+I make this extremely edge case from ChatGPT 5.2 
+You can see the result of edge case from here if you paste it. 
+https://mathjax.github.io/MathJax-demos-web/input/tex2chtml.html
+
+$$
+\newcommand{\ZZ}{\mathbb{Z}}
+\newcommand{\bad}[1]{\color{red}{#1}}
+
+\text{Macro test: }\ZZ \quad
+\text{Frac/Root: }\frac{\sqrt[5]{x^{2_3}+1}}{\left(1+\frac{1}{x}\right)^{n+1}} \quad
+\text{Matrix: }\left[\begin{array}{ccc}
+1 & 0 & -1\\
+\alpha & \beta & \gamma\\
+\sum_{k=1}^{n} k & \prod_{i=1}^{m} i & \int_{0}^{\pi}\sin t\,dt
+\end{array}\right]
+\quad
+\text{Sizing: }\left(\frac{a}{b}\right)\Bigg(\frac{c}{d}\Bigg)
+\quad
+\text{Error trigger: }\bad{\frac{1}{}}   % <- 這行故意錯
 $$

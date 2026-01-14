@@ -118,6 +118,38 @@ def main() -> int:
                     raise TimeoutError(f"KaTeX not ready; stats={last_stats}")
                 time.sleep(0.5)
 
+            # The page is long; validate math rendering in the later delimiter section too.
+            page.wait_for_function(
+                """() => {
+                    const root = document.getElementById('preview-pane');
+                    if (!root) return false;
+                    const text = (root.innerText || '');
+                    return text.includes('另一種定界符');
+                }"""
+            )
+            bottom_math_ok = page.evaluate(
+                """() => {
+                    const root = document.getElementById('preview-pane');
+                    if (!root) return { ok: false, reason: 'no-root' };
+
+                    const inline = Array.from(root.querySelectorAll('.katex'))
+                        .map((n) => String(n.textContent || ''))
+                        .join(' ')
+                        .replace(/\s+/g, '');
+                    const display = Array.from(root.querySelectorAll('.katex-display'))
+                        .map((n) => String(n.textContent || ''))
+                        .join(' ')
+                        .replace(/\s+/g, '');
+
+                    // Expect the MathJax-style delimiters section to be rendered.
+                    const hasPythagorean = inline.includes('a2+b2=c2');
+                    const hasNormExample = display.includes('x1') && display.includes('x2');
+                    return { ok: hasPythagorean && hasNormExample, hasPythagorean, hasNormExample };
+                }"""
+            )
+            if not bottom_math_ok.get("ok"):
+                raise AssertionError(f"Bottom-of-page math not rendered: {bottom_math_ok}")
+
             # Abbreviation should apply in normal text but not inside math.
             page.wait_for_function(
                 """() => {
