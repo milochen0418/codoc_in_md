@@ -1175,6 +1175,210 @@ def _split_inline_code_spans(buf: str) -> list[tuple[bool, str]]:
     return parts
 
 
+def _split_inline_math_spans(buf: str) -> list[tuple[bool, str]]:
+    """Split a string into (is_math, text) parts.
+
+    Protects common remark-math delimiters:
+    - $...$ (inline)
+    - \(...\) (inline)
+    - \[...\] (display-ish)
+
+    This is intentionally conservative: if a closing delimiter can't be found,
+    the remainder is treated as non-math.
+    """
+
+    if not buf:
+        return [(False, buf)]
+
+    parts: list[tuple[bool, str]] = []
+    i = 0
+    n = len(buf)
+
+    def _is_escaped(pos: int) -> bool:
+        # Count consecutive backslashes immediately before pos.
+        bs = 0
+        j = pos - 1
+        while j >= 0 and buf[j] == "\\":
+            bs += 1
+            j -= 1
+        return (bs % 2) == 1
+
+    while i < n:
+        # Prefer \( ... \) and \[ ... \] since they don't conflict with $.
+        next_paren = buf.find("\\(", i)
+        next_brack = buf.find("\\[", i)
+        next_dollar = buf.find("$", i)
+
+        candidates = [x for x in [next_paren, next_brack, next_dollar] if x != -1]
+        if not candidates:
+            parts.append((False, buf[i:]))
+            break
+
+        j = min(candidates)
+        if j > i:
+            parts.append((False, buf[i:j]))
+
+        # \( ... \)
+        if next_paren != -1 and j == next_paren:
+            k = buf.find("\\)", j + 2)
+            if k == -1:
+                parts.append((False, buf[j:]))
+                break
+            parts.append((True, buf[j : k + 2]))
+            i = k + 2
+            continue
+
+        # \[ ... \]
+        if next_brack != -1 and j == next_brack:
+            k = buf.find("\\]", j + 2)
+            if k == -1:
+                parts.append((False, buf[j:]))
+                break
+            parts.append((True, buf[j : k + 2]))
+            i = k + 2
+            continue
+
+        # $...$ (skip $$ which is display math and handled at the block level)
+        if next_dollar != -1 and j == next_dollar:
+            if _is_escaped(j):
+                parts.append((False, "$"))
+                i = j + 1
+                continue
+            if j + 1 < n and buf[j + 1] == "$":
+                parts.append((False, "$$"))
+                i = j + 2
+                continue
+
+            k = j + 1
+            while True:
+                k = buf.find("$", k)
+                if k == -1:
+                    parts.append((False, buf[j:]))
+                    i = n
+                    break
+                if _is_escaped(k):
+                    k += 1
+                    continue
+                if k + 1 < n and buf[k + 1] == "$":
+                    k += 2
+                    continue
+                parts.append((True, buf[j : k + 1]))
+                i = k + 1
+                break
+            continue
+
+        # Fallback (shouldn't happen)
+        parts.append((False, buf[j:]))
+        break
+
+    return parts
+
+
+def apply_hackmd_mathjax_delimiters(markdown_text: str) -> str:
+    """Normalize MathJax-style delimiters to remark-math compatible ones.
+
+    Reflex's Markdown pipeline (remark-math) reliably supports:
+    - inline: $...$
+    - display: $$ ... $$ (typically with newlines)
+
+    HackMD/CodiMD docs often show MathJax delimiters too:
+    - inline: \( ... \)
+    - display: \[ ... \]
+
+    This pass rewrites them without changing line counts:
+    - `\(` -> `$` and `\)` -> `$` (within a line)
+    - a line containing only `\[` becomes `$$`
+    - a line containing only `\]` becomes `$$`
+
+    Skips:
+    - fenced code blocks
+    - inline code spans
+    - existing display-math blocks delimited by `$$` on their own line
+    """
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    in_math_block = False
+    math_fence_re = re.compile(r"^\s*\$\$\s*$")
+    mj_open_re = re.compile(r"^\s*\\\[\s*$")
+    mj_close_re = re.compile(r"^\s*\\\]\s*$")
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        if not m:
+            return None
+        f = m.group("fence")
+        return f[0], len(f)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        if not ch or not ln:
+            return False
+        raw = line.rstrip("\n").rstrip("\r")
+        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+
+    def _rewrite_inline_math_delims(s: str) -> str:
+        if not s:
+            return s
+        # Work on non-code segments only.
+        parts: list[str] = []
+        for is_code, part in _split_inline_code_spans(s):
+            if is_code:
+                parts.append(part)
+                continue
+            # Only rewrite pairs that occur on the same line/segment.
+            parts.append(part.replace("\\(", "$" ).replace("\\)", "$"))
+        return "".join(parts)
+
+    for line in lines:
+        raw = line.rstrip("\r\n")
+        suffix = line[len(raw) :]
+
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                in_code = True
+                fence_char, fence_len = opened
+                out.append(line)
+                continue
+
+            # Respect existing $$ math blocks.
+            if math_fence_re.match(raw):
+                in_math_block = not in_math_block
+                out.append(line)
+                continue
+
+            if not in_math_block:
+                # Rewrite standalone \[ / \] lines to $$.
+                if mj_open_re.match(raw):
+                    out.append("$$" + suffix)
+                    continue
+                if mj_close_re.match(raw):
+                    out.append("$$" + suffix)
+                    continue
+
+                # Rewrite inline delimiters on this line.
+                out.append(_rewrite_inline_math_delims(line))
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+
+        out.append(line)
+
+    return "".join(out)
+
+
 _RUBY_RE = re.compile(r"\{ruby\s+(?P<base>[^|{}\n]+?)\|(?P<rt>[^{}\n]+?)\}")
 
 
@@ -1334,12 +1538,20 @@ def apply_hackmd_abbreviations(markdown_text: str) -> str:
         out.append(_replace_terms_in_plain(s[pos:]))
         return "".join(out)
 
+    def _replace_preserving_math(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        for is_math, part in _split_inline_math_spans(s):
+            out.append(part if is_math else _replace_preserving_html(part))
+        return "".join(out)
+
     def _replace_code_aware(s: str) -> str:
         if not s:
             return s
         out: list[str] = []
         for is_code, part in _split_inline_code_spans(s):
-            out.append(part if is_code else _replace_preserving_html(part))
+            out.append(part if is_code else _replace_preserving_math(part))
         return "".join(out)
 
     def _process_segment(segment: str) -> str:
@@ -1374,10 +1586,12 @@ def apply_hackmd_abbreviations(markdown_text: str) -> str:
 
     text2 = "".join(kept)
     fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    math_fence_re = re.compile(r"^\s*\$\$\s*$")
     lines2 = text2.splitlines(keepends=True)
     i = 0
     buf: list[str] = []
     out: list[str] = []
+    in_math = False
 
     def _flush():
         if not buf:
@@ -1386,6 +1600,20 @@ def apply_hackmd_abbreviations(markdown_text: str) -> str:
         buf.clear()
 
     while i < len(lines2):
+        if in_math:
+            out.append(lines2[i])
+            if math_fence_re.match(lines2[i].rstrip("\r\n")):
+                in_math = False
+            i += 1
+            continue
+
+        if math_fence_re.match(lines2[i].rstrip("\r\n")):
+            _flush()
+            out.append(lines2[i])
+            in_math = True
+            i += 1
+            continue
+
         raw = lines2[i].rstrip("\r\n")
         m_open = fence_open_re.match(raw)
         if not m_open:
@@ -1436,6 +1664,14 @@ def apply_hackmd_inline_extensions(markdown_text: str) -> str:
         out.append(_apply_inline_extensions_to_text(s[pos:]))
         return "".join(out)
 
+    def _apply_preserving_math(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        for is_math, part in _split_inline_math_spans(s):
+            out.append(part if is_math else _apply_preserving_html(part))
+        return "".join(out)
+
     def _apply_preserving_links(s: str) -> str:
         if not s:
             return s
@@ -1444,10 +1680,10 @@ def apply_hackmd_inline_extensions(markdown_text: str) -> str:
         for m in inline_link_or_image_re.finditer(s):
             before = s[pos : m.start()]
             if before:
-                out.append(_apply_preserving_html(before))
+                out.append(_apply_preserving_math(before))
             out.append(m.group("label") + "(" + m.group("dest") + ")")
             pos = m.end()
-        out.append(_apply_preserving_html(s[pos:]))
+        out.append(_apply_preserving_math(s[pos:]))
         return "".join(out)
 
     def _apply_preserving_md_syntax(s: str) -> str:
@@ -1487,10 +1723,12 @@ def apply_hackmd_inline_extensions(markdown_text: str) -> str:
         return "".join(out2)
 
     fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    math_fence_re = re.compile(r"^\s*\$\$\s*$")
     lines = text.splitlines(keepends=True)
     i = 0
     buf: list[str] = []
     out: list[str] = []
+    in_math = False
 
     def _flush():
         if not buf:
@@ -1499,6 +1737,20 @@ def apply_hackmd_inline_extensions(markdown_text: str) -> str:
         buf.clear()
 
     while i < len(lines):
+        if in_math:
+            out.append(lines[i])
+            if math_fence_re.match(lines[i].rstrip("\r\n")):
+                in_math = False
+            i += 1
+            continue
+
+        if math_fence_re.match(lines[i].rstrip("\r\n")):
+            _flush()
+            out.append(lines[i])
+            in_math = True
+            i += 1
+            continue
+
         raw = lines[i].rstrip("\r\n")
         m_open = fence_open_re.match(raw)
         if not m_open:
@@ -1660,6 +1912,14 @@ def apply_hackmd_typography(markdown_text: str) -> str:
             out.append(_apply_typography_to_text(s[pos2:]))
             return "".join(out)
 
+        def _apply_typography_preserving_math(s: str) -> str:
+            if not s:
+                return s
+            out: list[str] = []
+            for is_math, part in _split_inline_math_spans(s):
+                out.append(part if is_math else _apply_typography_preserving_html(part))
+            return "".join(out)
+
         # Markdown link/image aware: avoid transforming destinations/titles.
         # Smart-quote conversion inside `( ... )` breaks markdown parsing.
         _INLINE_LINK_OR_IMAGE_RE = re.compile(
@@ -1682,14 +1942,14 @@ def apply_hackmd_typography(markdown_text: str) -> str:
             for m4 in _INLINE_LINK_OR_IMAGE_RE.finditer(s):
                 before = s[pos4 : m4.start()]
                 if before:
-                    out2.append(_apply_typography_preserving_html(before))
+                    out2.append(_apply_typography_preserving_math(before))
 
                 label = m4.group("label")
                 dest = m4.group("dest")
                 out2.append(label + "(" + _normalize_curly_quotes_to_straight(dest) + ")")
                 pos4 = m4.end()
 
-            out2.append(_apply_typography_preserving_html(s[pos4:]))
+            out2.append(_apply_typography_preserving_math(s[pos4:]))
             return "".join(out2)
 
         def _apply_typography_preserving_md_syntax(s: str) -> str:
@@ -1759,9 +2019,11 @@ def apply_hackmd_typography(markdown_text: str) -> str:
     # Robust fenced-block skipping: supports 3+ backticks/tildes and won't be confused by
     # longer fences like ````` used to show ``` literally.
     fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    math_fence_re = re.compile(r"^\s*\$\$\s*$")
     lines = text.splitlines(keepends=True)
     i = 0
     buf: list[str] = []
+    in_math = False
 
     def _flush_buf():
         if not buf:
@@ -1770,6 +2032,20 @@ def apply_hackmd_typography(markdown_text: str) -> str:
         buf.clear()
 
     while i < len(lines):
+        if in_math:
+            out_parts.append(lines[i])
+            if math_fence_re.match(lines[i].rstrip("\r\n")):
+                in_math = False
+            i += 1
+            continue
+
+        if math_fence_re.match(lines[i].rstrip("\r\n")):
+            _flush_buf()
+            out_parts.append(lines[i])
+            in_math = True
+            i += 1
+            continue
+
         line = lines[i].rstrip("\r\n")
         m_open = fence_open_re.match(line)
         if not m_open:

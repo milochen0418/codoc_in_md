@@ -8,6 +8,7 @@ from typing import TypedDict, Optional
 from pathlib import Path
 
 from .embeds import (
+    apply_hackmd_mathjax_delimiters,
     apply_hackmd_code_blocks_with_lines,
     apply_hackmd_code_fence_options,
     apply_hackmd_blockquote_labels,
@@ -160,6 +161,10 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
     # Always add a final marker near EOF so the last segment doesn't rely solely on scrollHeight.
     last_line = len(lines)
     if last_line > 0 and last_marker_line != last_line:
+        # If the file doesn't end with a newline, avoid concatenating the marker
+        # onto the last line (which can break Markdown constructs like `$$`).
+        if out and not out[-1].endswith("\n"):
+            out.append("\n")
         out.append(_marker(last_line))
 
     # Add an invisible tail anchor to stabilize "last section" syncing.
@@ -167,6 +172,8 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
     # that rebuilds heading elements and can drop raw attributes/styles.
     # A plain div rendered via rehypeRaw preserves data attrs reliably.
     # Give it some height to mimic the "extra slack" effect of a real trailing heading.
+    if out and not out[-1].endswith("\n"):
+        out.append("\n")
     out.append(
         '<div data-codoc-tail="1" aria-hidden="true" '
         'style="height:40vh;opacity:0;overflow:hidden;pointer-events:none"></div>\n'
@@ -176,7 +183,8 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
 
 
 def _render_markdown_source(source: str) -> str:
-    normalized = _inject_scroll_markers(source, every=5)
+    normalized = apply_hackmd_mathjax_delimiters(source)
+    normalized = _inject_scroll_markers(normalized, every=5)
     normalized = apply_hackmd_code_fence_options(normalized)
     normalized = apply_hackmd_toc_placeholder(normalized)
     normalized = apply_hackmd_typography(normalized)
@@ -220,6 +228,7 @@ FIXTURE_DOCS: dict[str, str] = {
     "emojify_all": "hackmd_emojify_all_shortcodes.md",
     "embeds": "hackmd_embeds.md",
     "images": "hackmd_images.md",
+    "mathjax": "hackmd_mathjax.md",
 }
 
 
