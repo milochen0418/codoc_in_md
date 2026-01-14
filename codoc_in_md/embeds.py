@@ -14,10 +14,12 @@ import base64
 import binascii
 import functools
 import gzip
+import csv
 import ipaddress
 import html
 import os
 import re
+import zlib
 from typing import Protocol
 import json
 import time
@@ -816,10 +818,45 @@ def _format_inline_md_minimal(text: str) -> str:
 
     s = re.sub(r"<img\s+class=\"emoji\"[^>]*?/?>", _stash_img, raw)
     s = html.escape(s, quote=False)
+
+    # Ruby: {ruby base|rubytext}
+    s = _RUBY_RE.sub(
+        lambda m: (
+            "<ruby>"
+            + html.escape((m.group("base") or "").strip(), quote=False)
+            + "<rt>"
+            + html.escape((m.group("rt") or "").strip(), quote=False)
+            + "</rt></ruby>"
+        ),
+        s,
+    )
+
     # Inline code first.
     s = re.sub(r"`([^`]+)`", lambda m: f"<code class=\"px-1 py-0.5 rounded bg-gray-100 text-gray-800\">{html.escape(m.group(1), quote=False)}</code>", s)
     # Bold.
     s = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", s)
+
+    # Insert/mark/sub/sup (best-effort; avoids ~~strike~~ by requiring single tildes).
+    s = re.sub(
+        r"(?<!\+)\+\+([^\n+][\s\S]*?[^\n+])\+\+(?!\+)",
+        lambda m: f"<ins>{html.escape(m.group(1), quote=False)}</ins>",
+        s,
+    )
+    s = re.sub(
+        r"(?<!\=)==([^\n=][\s\S]*?[^\n=])==(?!=)",
+        lambda m: f"<mark>{html.escape(m.group(1), quote=False)}</mark>",
+        s,
+    )
+    s = re.sub(
+        r"\^([^\n^][\s\S]*?[^\n^])\^",
+        lambda m: f"<sup>{html.escape(m.group(1), quote=False)}</sup>",
+        s,
+    )
+    s = re.sub(
+        r"(?<!~)~(?!~)([^\n~][\s\S]*?[^\n~])(?<!~)~(?!~)",
+        lambda m: f"<sub>{html.escape(m.group(1), quote=False)}</sub>",
+        s,
+    )
 
     for idx, tag in enumerate(emoji_imgs):
         s = s.replace(f"@@COD0C_EMOJI_IMG_{idx}@@", tag)
@@ -1114,6 +1151,381 @@ def _apply_typography_to_text(text: str) -> str:
     return s
 
 
+def _split_inline_code_spans(buf: str) -> list[tuple[bool, str]]:
+    """Split a string into (is_code, text) parts for simple single-backtick spans."""
+
+    if not buf:
+        return [(False, buf)]
+
+    parts: list[tuple[bool, str]] = []
+    i = 0
+    while i < len(buf):
+        tick = buf.find("`", i)
+        if tick == -1:
+            parts.append((False, buf[i:]))
+            break
+        end = buf.find("`", tick + 1)
+        if end == -1:
+            parts.append((False, buf[i:]))
+            break
+        if tick > i:
+            parts.append((False, buf[i:tick]))
+        parts.append((True, buf[tick : end + 1]))
+        i = end + 1
+    return parts
+
+
+_RUBY_RE = re.compile(r"\{ruby\s+(?P<base>[^|{}\n]+?)\|(?P<rt>[^{}\n]+?)\}")
+
+
+def _apply_inline_extensions_to_text(text: str) -> str:
+    """Apply CodiMD/markdown-it inline extensions to plain text.
+
+    Supported:
+    - ++insert++ -> <ins>
+    - ==mark== -> <mark>
+    - ^sup^ -> <sup>
+    - ~sub~ -> <sub> (but not ~~strike~~)
+    - {ruby base|rt} -> <ruby><rt>
+
+    Caller must exclude code spans/blocks and protect markdown link destinations.
+    """
+
+    if not text:
+        return text
+
+    s = text
+
+    def _ins(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if not inner or inner.startswith(" ") or inner.endswith(" "):
+            return m.group(0)
+        return f"<ins>{html.escape(inner, quote=False)}</ins>"
+
+    def _mark(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if not inner or inner.startswith(" ") or inner.endswith(" "):
+            return m.group(0)
+        return f"<mark>{html.escape(inner, quote=False)}</mark>"
+
+    def _sup(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if not inner or inner.startswith(" ") or inner.endswith(" "):
+            return m.group(0)
+        return f"<sup>{html.escape(inner, quote=False)}</sup>"
+
+    def _sub(m: re.Match[str]) -> str:
+        inner = m.group(1)
+        if not inner or inner.startswith(" ") or inner.endswith(" "):
+            return m.group(0)
+        return f"<sub>{html.escape(inner, quote=False)}</sub>"
+
+    def _ruby(m: re.Match[str]) -> str:
+        base = (m.group("base") or "").strip()
+        rt = (m.group("rt") or "").strip()
+        if not base or not rt:
+            return m.group(0)
+        return (
+            "<ruby>"
+            + html.escape(base, quote=False)
+            + "<rt>"
+            + html.escape(rt, quote=False)
+            + "</rt></ruby>"
+        )
+
+    # Apply in an order that avoids interfering delimiters.
+    s = re.sub(r"(?<!\+)\+\+([^\n+][\s\S]*?[^\n+])\+\+(?!\+)", _ins, s)
+    s = re.sub(r"(?<!\=)==([^\n=][\s\S]*?[^\n=])==(?!=)", _mark, s)
+    s = re.sub(r"\^([^\n^][\s\S]*?[^\n^])\^", _sup, s)
+    # Avoid ~~strike~~: require single tildes.
+    s = re.sub(r"(?<!~)~(?!~)([^\n~][\s\S]*?[^\n~])(?<!~)~(?!~)", _sub, s)
+    s = _RUBY_RE.sub(_ruby, s)
+
+    return s
+
+
+_ABBR_DEF_RE = re.compile(r"^\*\[(?P<term>[^\]]+)\]\s*:\s*(?P<title>.+?)\s*$")
+
+
+def apply_hackmd_abbreviations(markdown_text: str) -> str:
+    """Support CodiMD/markdown-it-abbr style abbreviations."""
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    kept: list[str] = []
+    abbr: dict[str, str] = {}
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        if not m:
+            return None
+        f = m.group("fence")
+        return f[0], len(f)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        if not ch or not ln:
+            return False
+        raw = line.rstrip("\n").rstrip("\r")
+        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+
+    # 1) Extract definition lines, skipping code fences.
+    for line in lines:
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                in_code = True
+                fence_char, fence_len = opened
+                kept.append(line)
+                continue
+
+            m = _ABBR_DEF_RE.match(line.rstrip("\r\n"))
+            if m:
+                term = (m.group("term") or "").strip()
+                title = (m.group("title") or "").strip()
+                if term and title:
+                    abbr[term] = title
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+            kept.append(line)
+            continue
+
+        kept.append(line)
+
+    if not abbr:
+        return "".join(kept)
+
+    # 2) Replace terms in remaining text.
+    terms = sorted(abbr.keys(), key=len, reverse=True)
+    inline_link_or_image_re = re.compile(r"(?P<label>!?\[[^\]]*\])\((?P<dest>[^\)\n]*)\)")
+    html_tag_re = re.compile(r"</?[A-Za-z][^>]*?>")
+
+    def _replace_terms_in_plain(s: str) -> str:
+        if not s:
+            return s
+        for term in terms:
+            title = abbr[term]
+            pat = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])")
+            s = pat.sub(
+                lambda _m: f'<abbr title="{_escape_attr(title)}">{html.escape(term, quote=False)}</abbr>',
+                s,
+            )
+        return s
+
+    def _replace_preserving_html(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        pos = 0
+        for m in html_tag_re.finditer(s):
+            out.append(_replace_terms_in_plain(s[pos : m.start()]))
+            out.append(m.group(0))
+            pos = m.end()
+        out.append(_replace_terms_in_plain(s[pos:]))
+        return "".join(out)
+
+    def _replace_code_aware(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        for is_code, part in _split_inline_code_spans(s):
+            out.append(part if is_code else _replace_preserving_html(part))
+        return "".join(out)
+
+    def _process_segment(segment: str) -> str:
+        if not segment:
+            return segment
+
+        # Do not transform inside embed directives.
+        parts: list[str] = []
+        pos = 0
+        for m in _DIRECTIVE_RE.finditer(segment):
+            parts.append(segment[pos : m.start()])
+            parts.append(m.group(0))
+            pos = m.end()
+        parts.append(segment[pos:])
+
+        out2: list[str] = []
+        for i, chunk in enumerate(parts):
+            if i % 2 == 1:
+                out2.append(chunk)
+                continue
+
+            pos2 = 0
+            for m2 in inline_link_or_image_re.finditer(chunk):
+                before = chunk[pos2 : m2.start()]
+                if before:
+                    out2.append(_replace_code_aware(before))
+                out2.append(m2.group("label") + "(" + m2.group("dest") + ")")
+                pos2 = m2.end()
+            out2.append(_replace_code_aware(chunk[pos2:]))
+
+        return "".join(out2)
+
+    text2 = "".join(kept)
+    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    lines2 = text2.splitlines(keepends=True)
+    i = 0
+    buf: list[str] = []
+    out: list[str] = []
+
+    def _flush():
+        if not buf:
+            return
+        out.append(_process_segment("".join(buf)))
+        buf.clear()
+
+    while i < len(lines2):
+        raw = lines2[i].rstrip("\r\n")
+        m_open = fence_open_re.match(raw)
+        if not m_open:
+            buf.append(lines2[i])
+            i += 1
+            continue
+
+        _flush()
+        indent = m_open.group("indent")
+        fence = m_open.group("fence")
+        fence_char = fence[0]
+        fence_len = len(fence)
+        close_re = re.compile(rf"^{re.escape(indent)}{re.escape(fence_char)}{{{fence_len},}}\s*$")
+
+        out.append(lines2[i])
+        i += 1
+        while i < len(lines2) and not close_re.match(lines2[i].rstrip("\r\n")):
+            out.append(lines2[i])
+            i += 1
+        if i < len(lines2):
+            out.append(lines2[i])
+            i += 1
+
+    _flush()
+    return "".join(out)
+
+
+def apply_hackmd_inline_extensions(markdown_text: str) -> str:
+    """Apply CodiMD/markdown-it inline extensions (mark/ins/sub/sup/ruby)."""
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    html_tag_re = re.compile(r"</?[A-Za-z][^>]*?>")
+    inline_link_or_image_re = re.compile(r"(?P<label>!?\[[^\]]*\])\((?P<dest>[^\)\n]*)\)")
+    ref_def_line_re = re.compile(r"(?m)^\s*\[[^\]]+\]\s*:\s*[^\n]*$")
+
+    def _apply_preserving_html(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        pos = 0
+        for m in html_tag_re.finditer(s):
+            out.append(_apply_inline_extensions_to_text(s[pos : m.start()]))
+            out.append(m.group(0))
+            pos = m.end()
+        out.append(_apply_inline_extensions_to_text(s[pos:]))
+        return "".join(out)
+
+    def _apply_preserving_links(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        pos = 0
+        for m in inline_link_or_image_re.finditer(s):
+            before = s[pos : m.start()]
+            if before:
+                out.append(_apply_preserving_html(before))
+            out.append(m.group("label") + "(" + m.group("dest") + ")")
+            pos = m.end()
+        out.append(_apply_preserving_html(s[pos:]))
+        return "".join(out)
+
+    def _apply_preserving_md_syntax(s: str) -> str:
+        if not s:
+            return s
+        out: list[str] = []
+        pos = 0
+        for m in ref_def_line_re.finditer(s):
+            before = s[pos : m.start()]
+            if before:
+                out.append(_apply_preserving_links(before))
+            out.append(m.group(0))
+            pos = m.end()
+        out.append(_apply_preserving_links(s[pos:]))
+        return "".join(out)
+
+    def _process_segment(segment: str) -> str:
+        if not segment:
+            return segment
+
+        # Do not transform inside embed directives.
+        parts: list[str] = []
+        pos = 0
+        for m in _DIRECTIVE_RE.finditer(segment):
+            parts.append(segment[pos : m.start()])
+            parts.append(m.group(0))
+            pos = m.end()
+        parts.append(segment[pos:])
+
+        out2: list[str] = []
+        for i, chunk in enumerate(parts):
+            if i % 2 == 1:
+                out2.append(chunk)
+                continue
+            for is_code, part in _split_inline_code_spans(chunk):
+                out2.append(part if is_code else _apply_preserving_md_syntax(part))
+        return "".join(out2)
+
+    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    lines = text.splitlines(keepends=True)
+    i = 0
+    buf: list[str] = []
+    out: list[str] = []
+
+    def _flush():
+        if not buf:
+            return
+        out.append(_process_segment("".join(buf)))
+        buf.clear()
+
+    while i < len(lines):
+        raw = lines[i].rstrip("\r\n")
+        m_open = fence_open_re.match(raw)
+        if not m_open:
+            buf.append(lines[i])
+            i += 1
+            continue
+
+        _flush()
+        indent = m_open.group("indent")
+        fence = m_open.group("fence")
+        fence_char = fence[0]
+        fence_len = len(fence)
+        close_re = re.compile(rf"^{re.escape(indent)}{re.escape(fence_char)}{{{fence_len},}}\s*$")
+
+        out.append(lines[i])
+        i += 1
+        while i < len(lines) and not close_re.match(lines[i].rstrip("\r\n")):
+            out.append(lines[i])
+            i += 1
+        if i < len(lines):
+            out.append(lines[i])
+            i += 1
+
+    _flush()
+    return "".join(out)
+
+
 def _normalize_curly_quotes_to_straight(text: str) -> str:
     """Convert curly quotes (smart quotes) to straight quotes.
 
@@ -1384,6 +1796,78 @@ def apply_hackmd_typography(markdown_text: str) -> str:
 
     _flush_buf()
     return "".join(out_parts)
+
+
+_TOC_LINE_RE = re.compile(
+    r"^\s*\[toc(?:\s+maxLevel\s*=\s*(?P<max>\d+))?\]\s*$",
+    flags=re.IGNORECASE,
+)
+
+
+def apply_hackmd_toc_placeholder(markdown_text: str) -> str:
+    """Rewrite HackMD/CodiMD-style TOC marker lines into a raw HTML placeholder.
+
+    Supported forms (must be on their own line):
+    - `[TOC]`
+    - `[TOC maxLevel=3]`
+
+    Output is a raw HTML block that relies on `rehypeRaw` to render:
+      <div class="codoc-toc" data-toc-depth="3" data-codoc-toc="1"></div>
+
+    Skips fenced code blocks.
+    """
+
+    text = markdown_text or ""
+    if not text:
+        return text
+
+    lines = text.splitlines(keepends=True)
+    out: list[str] = []
+
+    in_code = False
+    fence_char = ""
+    fence_len = 0
+
+    def _maybe_open_fence(line: str) -> tuple[str, int] | None:
+        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        if not m:
+            return None
+        fence = m.group("fence")
+        return fence[0], len(fence)
+
+    def _is_fence_close(line: str, ch: str, ln: int) -> bool:
+        if not ch or not ln:
+            return False
+        raw = line.rstrip("\n").rstrip("\r")
+        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+
+    for line in lines:
+        if not in_code:
+            opened = _maybe_open_fence(line)
+            if opened is not None:
+                in_code = True
+                fence_char, fence_len = opened
+                out.append(line)
+                continue
+
+            m = _TOC_LINE_RE.match(line.rstrip("\r\n"))
+            if m:
+                depth_raw = (m.group("max") or "").strip()
+                depth = int(depth_raw) if depth_raw.isdigit() else 3
+                depth = max(1, min(6, depth))
+                out.append(
+                    f'<div class="codoc-toc" data-toc-depth="{depth}" data-codoc-toc="1"></div>\n'
+                )
+                continue
+        else:
+            if _is_fence_close(line, fence_char, fence_len):
+                in_code = False
+                fence_char = ""
+                fence_len = 0
+
+        out.append(line)
+
+    return "".join(out)
 
 
 _FA_I_TAG_RE = re.compile(
@@ -2478,6 +2962,157 @@ class VegaLiteBlock:
         )
 
 
+class CsvPreviewBlock:
+    """Render ```csvpreview fenced blocks as an HTML table (CodiMD-like)."""
+
+    language = "csvpreview"
+
+    _OPTIONS_RE = re.compile(r"^\{(?P<body>[^}]*)\}\s*$")
+    _KV_RE = re.compile(
+        r"(?P<key>[A-Za-z_][A-Za-z0-9_-]*)\s*=\s*(?:\"(?P<dq>[^\"]*)\"|'(?P<sq>[^']*)'|(?P<bare>[^\s]+))"
+    )
+
+    def _parse_options(self, first_line: str) -> dict[str, str]:
+        m = self._OPTIONS_RE.match((first_line or "").strip())
+        if not m:
+            return {}
+        body = m.group("body") or ""
+        opts: dict[str, str] = {}
+        for km in self._KV_RE.finditer(body):
+            key = (km.group("key") or "").strip()
+            val = km.group("dq")
+            if val is None:
+                val = km.group("sq")
+            if val is None:
+                val = km.group("bare")
+            opts[key] = (val or "").strip()
+        return opts
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        code = (block.code or "")
+        if not code.strip():
+            return None
+
+        lines = code.splitlines()
+        opts: dict[str, str] = {}
+        if lines and self._OPTIONS_RE.match(lines[0].strip()):
+            opts = self._parse_options(lines[0])
+            lines = lines[1:]
+
+        delimiter = (opts.get("delimiter") or ",")
+        if len(delimiter) != 1:
+            delimiter = ","
+        header = (opts.get("header") or "").lower() in {"true", "1", "yes", "y"}
+
+        rows = list(csv.reader(lines, delimiter=delimiter))
+        if not rows:
+            return None
+
+        head: list[str] | None = None
+        body_rows = rows
+        if header and rows:
+            head = rows[0]
+            body_rows = rows[1:]
+
+        def _cell(s: str) -> str:
+            return html.escape(s or "", quote=False)
+
+        thead_html = ""
+        if head is not None:
+            thead_html = (
+                "<thead class=\"bg-gray-50 border-b border-gray-200\">"
+                "<tr>"
+                + "".join(
+                    f"<th class=\"px-4 py-3 text-xs font-semibold text-gray-700 border-r border-gray-200 last:border-r-0 whitespace-nowrap\">{_cell(c)}</th>"
+                    for c in head
+                )
+                + "</tr></thead>"
+            )
+
+        tbody_html = (
+            "<tbody class=\"bg-white\">"
+            + "".join(
+                "<tr class=\"border-b border-gray-200 last:border-b-0 even:bg-gray-50/40\">"
+                + "".join(
+                    f"<td class=\"px-4 py-3 align-top border-r border-gray-200 last:border-r-0 whitespace-normal break-words\">{_cell(c)}</td>"
+                    for c in row
+                )
+                + "</tr>"
+                for row in body_rows
+            )
+            + "</tbody>"
+        )
+
+        table = (
+            "<div class=\"my-6 rounded-lg border border-gray-200 bg-white overflow-hidden\">"
+            "<div class=\"overflow-x-auto\">"
+            "<table class=\"min-w-full border-collapse text-sm text-gray-800\">"
+            + thead_html
+            + tbody_html
+            + "</table></div></div>"
+        )
+        return "\n" + table + "\n"
+
+
+class PlantUmlBlock:
+    """Render ```plantuml fenced blocks as an <img> using a PlantUML server."""
+
+    language = "plantuml"
+
+    @staticmethod
+    def _plantuml_server() -> str:
+        return os.getenv("CODOC_PLANTUML_SERVER", "https://www.plantuml.com/plantuml").rstrip("/")
+
+    @staticmethod
+    def _encode_plantuml(text: str) -> str:
+        """Encode PlantUML text using the deflate + PlantUML base64 algorithm."""
+
+        raw = (text or "").encode("utf-8")
+        comp = zlib.compressobj(level=9, wbits=-15)
+        data = comp.compress(raw) + comp.flush()
+
+        def _encode6(b: int) -> str:
+            if b < 10:
+                return chr(48 + b)
+            b -= 10
+            if b < 26:
+                return chr(65 + b)
+            b -= 26
+            if b < 26:
+                return chr(97 + b)
+            b -= 26
+            if b == 0:
+                return "-"
+            if b == 1:
+                return "_"
+            return "?"
+
+        def _append3(chunk: bytes) -> str:
+            b1 = chunk[0]
+            b2 = chunk[1] if len(chunk) > 1 else 0
+            b3 = chunk[2] if len(chunk) > 2 else 0
+            c1 = b1 >> 2
+            c2 = ((b1 & 0x3) << 4) | (b2 >> 4)
+            c3 = ((b2 & 0xF) << 2) | (b3 >> 6)
+            c4 = b3 & 0x3F
+            return _encode6(c1) + _encode6(c2) + _encode6(c3) + _encode6(c4)
+
+        out: list[str] = []
+        i = 0
+        while i < len(data):
+            out.append(_append3(data[i : i + 3]))
+            i += 3
+        return "".join(out)
+
+    def render(self, block: FencedCodeBlock) -> str | None:
+        code = (block.code or "").strip("\r\n")
+        if not code.strip():
+            return None
+        encoded = self._encode_plantuml(code)
+        url = f"{self._plantuml_server()}/svg/{encoded}"
+        return "\n" + f"<div class=\"my-4\"><img src=\"{_escape_attr(url)}\" alt=\"PlantUML diagram\"/></div>\n"
+
+
 EMBED_EXTENSIONS: dict[str, EmbedExtension] = {
     "youtube": YouTubeEmbed(),
     "vimeo": VimeoEmbed(),
@@ -2498,6 +3133,8 @@ FENCED_BLOCK_EXTENSIONS: dict[str, FencedBlockExtension] = {
     "abc": AbcBlock(),
     "vega": VegaLiteBlock(),
     "vega-lite": VegaLiteBlock(),
+    "csvpreview": CsvPreviewBlock(),
+    "plantuml": PlantUmlBlock(),
 }
 
 

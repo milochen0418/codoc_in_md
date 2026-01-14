@@ -37,84 +37,106 @@ def editor_panel() -> rx.Component:
 def preview_panel() -> rx.Component:
     """The markdown preview panel."""
 
-    def _children_node(node):
-        """Return the rendered children payload for rx.markdown component_map."""
+    def _as_fragment(*children):
+        # `CleanMarkdown` passes react-markdown children as a runtime Var.
+        # Wrap in a fragment so we can add our own wrapper elements/styles.
+        if len(children) == 1 and isinstance(children[0], list):
+            return rx.fragment(*children[0])
+        return rx.fragment(*children)
 
-        if node is None:
-            return ""
-        if isinstance(node, dict):
-            return node.get("children")
-        return node
-
-    def _as_fragment(children):
-        if isinstance(children, list):
-            return rx.fragment(*children)
-        return rx.fragment(children)
+    def _safe_dom_props(props: dict) -> dict:
+        # Preserve useful DOM attributes (especially `id` for heading anchors/TOC)
+        # while avoiding react-markdown internal props that cause warnings.
+        out: dict = {}
+        for key, val in (props or {}).items():
+            if key in {"id", "title", "lang", "dir", "style"}:
+                out[key] = val
+            elif isinstance(key, str) and (
+                key.startswith("data-")
+                or key.startswith("aria-")
+                or key in {"data", "aria"}
+            ):
+                out[key] = val
+        return out
 
     rendered = CleanMarkdown.create(
         EditorState.doc_content_rendered,
         component_map={
-            "h1": lambda node: rx.el.h1(
-                _as_fragment(_children_node(node)),
+            "h1": lambda *children, **props: rx.el.h1(
+                _as_fragment(*children),
                 class_name="text-3xl font-bold text-gray-900 mb-4",
+                **_safe_dom_props(props),
             ),
-            "h2": lambda node: rx.el.h2(
-                _as_fragment(_children_node(node)),
+            "h2": lambda *children, **props: rx.el.h2(
+                _as_fragment(*children),
                 class_name="text-2xl font-bold text-gray-800 mt-6 mb-3 pb-1 border-b",
+                **_safe_dom_props(props),
             ),
-            "h3": lambda node: rx.el.h3(
-                _as_fragment(_children_node(node)),
+            "h3": lambda *children, **props: rx.el.h3(
+                _as_fragment(*children),
                 class_name="text-xl font-bold text-gray-800 mt-4 mb-2",
+                **_safe_dom_props(props),
             ),
-            "p": lambda node: rx.el.p(
-                _as_fragment(_children_node(node)),
+            "p": lambda *children, **props: rx.el.p(
+                _as_fragment(*children),
                 class_name="mb-4 text-gray-700 leading-relaxed whitespace-pre-wrap",
+                **_safe_dom_props(props),
             ),
-            "ul": lambda node: rx.el.ul(
-                _as_fragment(_children_node(node)),
+            "ul": lambda *children, **props: rx.el.ul(
+                _as_fragment(*children),
                 class_name="list-disc list-inside mb-4 pl-4",
+                **_safe_dom_props(props),
             ),
-            "ol": lambda node: rx.el.ol(
-                _as_fragment(_children_node(node)),
+            "ol": lambda *children, **props: rx.el.ol(
+                _as_fragment(*children),
                 class_name="list-decimal list-inside mb-4 pl-4",
+                **_safe_dom_props(props),
             ),
-            "li": lambda node: rx.el.li(
-                _as_fragment(_children_node(node)),
+            "li": lambda *children, **props: rx.el.li(
+                _as_fragment(*children),
                 class_name="mb-1 text-gray-700 whitespace-pre-wrap",
+                **_safe_dom_props(props),
             ),
-            "blockquote": lambda node: rx.el.blockquote(
-                _as_fragment(_children_node(node)),
+            "blockquote": lambda *children, **props: rx.el.blockquote(
+                _as_fragment(*children),
                 class_name="border-l-4 border-gray-300 pl-4 italic my-4",
+                **_safe_dom_props(props),
             ),
-            "table": lambda node: rx.el.div(
+            "table": lambda *children, **props: rx.el.div(
                 rx.el.div(
                     rx.el.table(
-                        _as_fragment(_children_node(node)),
+                        _as_fragment(*children),
                         class_name="min-w-full border-collapse text-sm text-gray-800",
                     ),
                     class_name="overflow-x-auto",
                 ),
                 class_name="my-6 rounded-lg border border-gray-200 bg-white overflow-hidden",
+                **_safe_dom_props(props),
             ),
-            "thead": lambda node: rx.el.thead(
-                _as_fragment(_children_node(node)),
+            "thead": lambda *children, **props: rx.el.thead(
+                _as_fragment(*children),
                 class_name="bg-gray-50 border-b border-gray-200",
+                **_safe_dom_props(props),
             ),
-            "tbody": lambda node: rx.el.tbody(
-                _as_fragment(_children_node(node)),
+            "tbody": lambda *children, **props: rx.el.tbody(
+                _as_fragment(*children),
                 class_name="bg-white",
+                **_safe_dom_props(props),
             ),
-            "tr": lambda node: rx.el.tr(
-                _as_fragment(_children_node(node)),
+            "tr": lambda *children, **props: rx.el.tr(
+                _as_fragment(*children),
                 class_name="border-b border-gray-200 last:border-b-0 even:bg-gray-50/40",
+                **_safe_dom_props(props),
             ),
-            "th": lambda node: rx.el.th(
-                _as_fragment(_children_node(node)),
+            "th": lambda *children, **props: rx.el.th(
+                _as_fragment(*children),
                 class_name="px-4 py-3 text-xs font-semibold text-gray-700 border-r border-gray-200 last:border-r-0 whitespace-nowrap",
+                **_safe_dom_props(props),
             ),
-            "td": lambda node: rx.el.td(
-                _as_fragment(_children_node(node)),
+            "td": lambda *children, **props: rx.el.td(
+                _as_fragment(*children),
                 class_name="px-4 py-3 align-top border-r border-gray-200 last:border-r-0 whitespace-normal break-words",
+                **_safe_dom_props(props),
             ),
         },
     )

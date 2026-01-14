@@ -27,6 +27,187 @@
     retryCount: 0,
   };
 
+  function slugifyGfm(text) {
+    let s = String(text || '').trim();
+    if (!s) return '';
+    try {
+      s = s.normalize('NFKD');
+    } catch (_) {
+      // ignore
+    }
+    s = s.toLowerCase();
+    // Keep unicode letters/numbers, whitespace, and hyphens.
+    // This matches GitHub/CodiMD behavior more closely for CJK headings.
+    try {
+      s = s.replace(/[^\p{L}\p{N}\s-]/gu, '');
+    } catch (_) {
+      // Fallback if unicode property escapes are unavailable.
+      s = s.replace(/[^\w\s-]/g, '');
+    }
+    s = s.replace(/\s+/g, '-');
+    s = s.replace(/-+/g, '-');
+    s = s.replace(/^-+|-+$/g, '');
+    return s;
+  }
+
+  function ensureHeadingIds(previewRoot) {
+    if (!previewRoot) return;
+    const headings = Array.from(previewRoot.querySelectorAll('h1,h2,h3,h4,h5,h6'));
+    const used = new Map();
+
+    // Seed `used` with existing ids.
+    for (const h of headings) {
+      const id = (h.getAttribute('id') || '').trim();
+      if (!id) continue;
+      used.set(id, (used.get(id) || 0) + 1);
+    }
+
+    for (const h of headings) {
+      const existing = (h.getAttribute('id') || '').trim();
+      if (existing) continue;
+      const base = slugifyGfm(h.textContent || '');
+      if (!base) continue;
+      let id = base;
+      if (used.has(id)) {
+        let n = used.get(id) || 1;
+        // CodiMD/GitHub style: append -1, -2, ...
+        while (used.has(base + '-' + n)) n += 1;
+        id = base + '-' + n;
+      }
+      h.setAttribute('id', id);
+      used.set(id, 1);
+    }
+  }
+
+  function buildToc(previewRoot, maxLevel) {
+    const headings = Array.from(previewRoot.querySelectorAll('h1,h2,h3,h4,h5,h6'))
+      .map((h) => {
+        const level = parseInt(String(h.tagName || '').slice(1), 10);
+        return { h, level };
+      })
+      .filter((x) => Number.isFinite(x.level) && x.level >= 1 && x.level <= maxLevel)
+      .filter((x) => (x.h.getAttribute('id') || '').trim().length > 0);
+
+    if (!headings.length) return null;
+
+    const minLevel = Math.min.apply(
+      null,
+      headings.map((x) => x.level)
+    );
+
+    const tocRoot = document.createElement('div');
+    tocRoot.className = 'toc my-4 p-4 bg-gray-50 border border-gray-200 rounded';
+
+    const topUl = document.createElement('ul');
+    topUl.className = 'list-disc pl-5 space-y-1';
+    tocRoot.appendChild(topUl);
+
+    const stack = [{ level: minLevel, ul: topUl, lastLi: null }];
+
+    function ensureDepth(targetLevel) {
+      while (stack.length && targetLevel < stack[stack.length - 1].level) {
+        stack.pop();
+      }
+      while (stack.length && targetLevel > stack[stack.length - 1].level) {
+        const parent = stack[stack.length - 1];
+        const parentLi = parent.lastLi;
+        const newUl = document.createElement('ul');
+        newUl.className = 'list-disc pl-5 space-y-1 mt-1';
+        if (parentLi) {
+          parentLi.appendChild(newUl);
+        } else {
+          parent.ul.appendChild(newUl);
+        }
+        stack.push({ level: parent.level + 1, ul: newUl, lastLi: null });
+      }
+    }
+
+    for (const item of headings) {
+      const level = item.level;
+      ensureDepth(level);
+
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#' + item.h.getAttribute('id');
+      a.textContent = normalizeText(item.h.textContent || '');
+      a.className = 'text-blue-700 hover:underline';
+      li.appendChild(a);
+      const top = stack[stack.length - 1];
+      top.ul.appendChild(li);
+      top.lastLi = li;
+    }
+
+    return tocRoot;
+  }
+
+  function renderTocPlaceholders(previewRoot) {
+    if (!previewRoot) return;
+    const placeholders = Array.from(previewRoot.querySelectorAll('div.codoc-toc[data-codoc-toc="1"]'));
+    if (!placeholders.length) return;
+
+    ensureHeadingIds(previewRoot);
+
+    for (const ph of placeholders) {
+      const raw = (ph.getAttribute('data-toc-depth') || '').trim();
+      const depth = Math.max(1, Math.min(6, parseInt(raw || '3', 10) || 3));
+      const toc = buildToc(previewRoot, depth);
+      if (!toc) {
+        ph.replaceWith(document.createTextNode(''));
+        continue;
+      }
+      ph.replaceWith(toc);
+    }
+  }
+
+  function scrollPreviewToHash(previewScrollEl, hash) {
+    if (!previewScrollEl) return;
+    const id = String(hash || '').replace(/^#/, '').trim();
+    if (!id) return;
+    let target = null;
+    try {
+      target = previewScrollEl.querySelector('#' + CSS.escape(id));
+    } catch (_) {
+      target = previewScrollEl.querySelector('[id="' + id.replace(/"/g, '') + '"]');
+    }
+    if (!target) return;
+    try {
+      const top = target.getBoundingClientRect().top - previewScrollEl.getBoundingClientRect().top;
+      previewScrollEl.scrollTop = previewScrollEl.scrollTop + top - 8;
+    } catch (_) {
+      // ignore
+    }
+  }
+
+  function bindPreviewHashScrollOnce() {
+    if (!state.previewScrollEl || state.previewScrollEl.__codocHashBound) return;
+    state.previewScrollEl.__codocHashBound = true;
+
+    state.previewScrollEl.addEventListener(
+      'click',
+      function (e) {
+        const a = e.target && e.target.closest ? e.target.closest('a') : null;
+        if (!a) return;
+        const href = a.getAttribute('href') || '';
+        if (!href || href[0] !== '#') return;
+        e.preventDefault();
+        const id = href;
+        // Keep URL hash in sync (HackMD-like).
+        try {
+          window.history.replaceState(null, '', id);
+        } catch (_) {
+          // ignore
+        }
+        scrollPreviewToHash(state.previewScrollEl, id);
+      },
+      true
+    );
+
+    // Initial load hash.
+    if (window.location && window.location.hash) {
+      scrollPreviewToHash(state.previewScrollEl, window.location.hash);
+    }
+  }
+
   function clamp(n, min, max) {
     return Math.min(max, Math.max(min, n));
   }
@@ -809,6 +990,16 @@
     applySavedSplit(state.container);
     bindDividerOnce();
     bindEditorScrollOnce();
+    bindPreviewHashScrollOnce();
+    // Post-render enhancements (CodiMD-like): heading ids + TOC rendering.
+    try {
+      if (state.previewScrollEl) {
+        ensureHeadingIds(state.previewScrollEl);
+        renderTocPlaceholders(state.previewScrollEl);
+      }
+    } catch (_) {
+      // ignore
+    }
 
     // Monaco often loads after initial DOM; retry a few times to upgrade from DOM fallback
     // to Monaco API-based scroll syncing.

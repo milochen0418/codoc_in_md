@@ -17,6 +17,9 @@ from .embeds import (
     apply_hackmd_image_sizes,
     apply_hackmd_fontawesome_icons,
     apply_hackmd_typography,
+    apply_hackmd_inline_extensions,
+    apply_hackmd_abbreviations,
+    apply_hackmd_toc_placeholder,
 )
 
 
@@ -175,7 +178,10 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
 def _render_markdown_source(source: str) -> str:
     normalized = _inject_scroll_markers(source, every=5)
     normalized = apply_hackmd_code_fence_options(normalized)
+    normalized = apply_hackmd_toc_placeholder(normalized)
     normalized = apply_hackmd_typography(normalized)
+    normalized = apply_hackmd_inline_extensions(normalized)
+    normalized = apply_hackmd_abbreviations(normalized)
     normalized = apply_hackmd_fontawesome_icons(normalized)
     normalized = apply_hackmd_emojis(normalized)
     normalized = apply_hackmd_image_sizes(normalized)

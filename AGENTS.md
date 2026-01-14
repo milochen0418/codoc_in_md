@@ -13,7 +13,7 @@ If you already read them earlier in the session, **re-check** when unsure.
 
 ## 1) Python / Poetry requirements (strict)
 
-This project targets **Python 3.11**.
+This project targets **Python 3.11**. **Don't create the virtual environment of Python 3.14**
 
 - Prefer Poetry-managed environments.
 - If Poetry selected another Python (e.g. 3.12+), switch it:
