@@ -227,6 +227,7 @@ FIXTURE_DOCS: dict[str, str] = {
     "emojify": "hackmd_emojify_smoke.md",
     "emojify_all": "hackmd_emojify_all_shortcodes.md",
     "embeds": "hackmd_embeds.md",
+    "fontawesome": "hackmd_fontawesome.md",
     "images": "hackmd_images.md",
     "mathjax": "hackmd_mathjax.md",
 }

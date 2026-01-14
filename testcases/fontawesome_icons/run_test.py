@@ -65,7 +65,7 @@ def main() -> int:
         page.set_default_timeout(timeout_ms)
 
         try:
-            page.goto(base_url + "/doc/embeds", wait_until="domcontentloaded")
+            page.goto(base_url + "/doc/fontawesome", wait_until="domcontentloaded")
             _wait_for_app_ready(page)
 
             # Assert at least one Font Awesome icon survives rendering.
@@ -89,6 +89,26 @@ def main() -> int:
                     const root = document.getElementById('preview-pane');
                     if (!root) return false;
                     return !!root.querySelector('.fa');
+                }"""
+            )
+
+            # Ensure a few specific icons from the fixture render.
+            page.wait_for_function(
+                """() => {
+                    const root = document.getElementById('preview-pane');
+                    if (!root) return false;
+                    const mustHave = ['.fa-github', '.fa-camera', '.fa-cog', '.fa-check', '.fa-times'];
+                    return mustHave.every((sel) => !!root.querySelector(sel));
+                }"""
+            )
+
+            # Ensure fenced code blocks are not rewritten (we should see the literal <i ...> text in code).
+            page.wait_for_function(
+                """() => {
+                    const root = document.getElementById('preview-pane');
+                    if (!root) return false;
+                    const pres = Array.from(root.querySelectorAll('pre'));
+                    return pres.some((n) => (n.textContent || '').includes('<i class="fa fa-github"></i>'));
                 }"""
             )
 
