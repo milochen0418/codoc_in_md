@@ -230,6 +230,7 @@ FIXTURE_DOCS: dict[str, str] = {
     "fontawesome": "hackmd_fontawesome.md",
     "images": "hackmd_images.md",
     "mathjax": "hackmd_mathjax.md",
+    "hackmd_toc": "hackmd_toc.md",
 }
 
 
