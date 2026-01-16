@@ -43,11 +43,10 @@ def main() -> int:
                 """() => {
                     const root = document.getElementById('preview-pane');
                     if (!root) return false;
-                    const text = root.textContent || '';
-                    return text.includes('@startuml') &&
-                        text.includes('Alice') &&
-                        text.includes('Bob') &&
-                        text.includes('Authentication Request');
+                    const img = root.querySelector('img[alt="PlantUML diagram"]');
+                    if (!img) return false;
+                    const src = img.getAttribute('src') || '';
+                    return src.includes('/plantuml/svg/') || src.includes('plantuml.com/plantuml/svg/');
                 }"""
             )
 
