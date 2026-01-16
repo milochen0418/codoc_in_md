@@ -231,6 +231,7 @@ FIXTURE_DOCS: dict[str, str] = {
     "images": "hackmd_images.md",
     "mathjax": "hackmd_mathjax.md",
     "hackmd_toc": "hackmd_toc.md",
+    "plantuml": "ext_plantuml.md",
 }
 
 
