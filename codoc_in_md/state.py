@@ -470,6 +470,11 @@ class EditorState(rx.State):
     def set_view_mode(self, mode: str):
         """Sets the current view mode (editor, split, or preview)."""
         self.view_mode = mode
+        # When returning to a view that shows the editor, ensure the Monaco
+        # seed matches the latest document content so it doesn't reset.
+        if mode in {"editor", "split"}:
+            self.editor_seed_content = self.doc_content
+            self.editor_seed_version += 1
 
     @rx.event
     def toggle_scroll_lock(self):
