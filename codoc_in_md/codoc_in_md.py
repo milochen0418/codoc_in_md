@@ -64,7 +64,7 @@ def preview_panel() -> rx.Component:
         component_map={
             "h1": lambda *children, **props: rx.el.h1(
                 _as_fragment(*children),
-                class_name="text-3xl font-bold text-gray-900 mb-4",
+                class_name="text-3xl font-bold text-gray-900 mb-4 pb-2 border-b border-gray-200",
                 **_safe_dom_props(props),
             ),
             "h2": lambda *children, **props: rx.el.h2(

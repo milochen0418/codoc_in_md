@@ -96,10 +96,23 @@
     );
 
     const tocRoot = document.createElement('div');
-    tocRoot.className = 'toc my-4 p-4 bg-gray-50 border border-gray-200 rounded';
+    tocRoot.className = 'toc my-4';
+
+    function listStyleTypeForDepth(depthIdx) {
+      return depthIdx <= 0 ? 'disc' : depthIdx === 1 ? 'circle' : depthIdx === 2 ? 'square' : 'disc';
+    }
+
+    function applyListStyles(ul, depthIdx) {
+      ul.style.listStylePosition = 'outside';
+      ul.style.listStyleType = listStyleTypeForDepth(depthIdx);
+      ul.style.paddingLeft = '1.5rem';
+      ul.style.marginLeft = depthIdx <= 0 ? '0.25rem' : '1rem';
+      ul.style.marginTop = '0.25rem';
+      ul.style.marginBottom = '0';
+    }
 
     const topUl = document.createElement('ul');
-    topUl.className = 'list-disc pl-5 space-y-1';
+    applyListStyles(topUl, 0);
     tocRoot.appendChild(topUl);
 
     const stack = [{ level: minLevel, ul: topUl, lastLi: null }];
@@ -112,7 +125,8 @@
         const parent = stack[stack.length - 1];
         const parentLi = parent.lastLi;
         const newUl = document.createElement('ul');
-        newUl.className = 'list-disc pl-5 space-y-1 mt-1';
+        const depthIdx = stack.length;
+        applyListStyles(newUl, depthIdx);
         if (parentLi) {
           parentLi.appendChild(newUl);
         } else {
@@ -127,10 +141,23 @@
       ensureDepth(level);
 
       const li = document.createElement('li');
+      const depthIdx = Math.max(0, stack.length - 1);
+      li.style.display = 'list-item';
+      li.style.listStylePosition = 'outside';
+      li.style.listStyleType = listStyleTypeForDepth(depthIdx);
+      li.style.marginTop = '0.25rem';
+      li.style.marginLeft = depthIdx <= 0 ? '0' : '0.5rem';
       const a = document.createElement('a');
       a.href = '#' + item.h.getAttribute('id');
       a.textContent = normalizeText(item.h.textContent || '');
-      a.className = 'text-blue-700 hover:underline';
+      a.style.color = '#4f46e5';
+      a.style.textDecoration = 'none';
+      a.addEventListener('mouseenter', () => {
+        a.style.textDecoration = 'underline';
+      });
+      a.addEventListener('mouseleave', () => {
+        a.style.textDecoration = 'none';
+      });
       li.appendChild(a);
       const top = stack[stack.length - 1];
       top.ul.appendChild(li);

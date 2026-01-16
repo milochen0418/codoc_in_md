@@ -70,15 +70,15 @@ def main() -> int:
             print("Checking TOC links...")
             
             # Use text selectors to verify links exist
-            link1 = toc.get_by_role("link", name="Section 1")
+            link1 = toc.get_by_role("link", name="Section 1", exact=True)
             if not link1.is_visible():
                 raise Exception("TOC link for 'Section 1' not found")
                 
-            link1_1 = toc.get_by_role("link", name="Subsection 1.1")
+            link1_1 = toc.get_by_role("link", name="Subsection 1.1", exact=True)
             if not link1_1.is_visible():
                  raise Exception("TOC link for 'Subsection 1.1' not found")
 
-            link2 = toc.get_by_role("link", name="Section 2")
+            link2 = toc.get_by_role("link", name="Section 2", exact=True)
             if not link2.is_visible():
                 raise Exception("TOC link for 'Section 2' not found")
 
