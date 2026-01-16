@@ -1,0 +1,34 @@
+html.codoc-fullscreen,
+body.codoc-fullscreen {
+  height: 100% !important;
+  overflow: hidden !important;
+  background: #ffffff !important;
+}
+
+html.codoc-fullscreen header,
+html.codoc-fullscreen aside {
+  display: none !important;
+}
+
+html.codoc-fullscreen #editor-pane,
+html.codoc-fullscreen #split-divider {
+  display: none !important;
+}
+
+html.codoc-fullscreen #codoc-split {
+  grid-template-columns: 1fr !important;
+}
+
+html.codoc-fullscreen #preview-pane {
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: auto !important;
+  background: #ffffff !important;
+}
+
+html.codoc-fullscreen #preview-pane > div {
+  max-width: none !important;
+  padding: 32px !important;
+}

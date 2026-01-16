@@ -58,6 +58,14 @@ def view_toggle() -> rx.Component:
             on_click=lambda: EditorState.set_view_mode("preview"),
             title="Preview Only",
         ),
+        rx.el.button(
+            rx.icon("maximize", class_name="h-4 w-4"),
+            class_name=f"{button_base} {inactive_style}",
+            on_click=rx.call_script(
+                "window.codocToggleFullscreen && window.codocToggleFullscreen()"
+            ),
+            title="Fullscreen Preview (Esc to exit)",
+        ),
         class_name="flex items-center gap-1 border-l border-gray-200 pl-3 ml-3 hidden md:flex",
     )
 
