@@ -33,6 +33,14 @@ def sidebar() -> rx.Component:
                 class_name="w-full text-left flex items-center px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md",
             ),
             rx.el.button(
+                rx.icon("download", class_name="mr-2 h-4 w-4"),
+                "Export as PDF",
+                on_click=rx.call_script(
+                    "window.codocExportPdf && window.codocExportPdf()"
+                ),
+                class_name="w-full text-left flex items-center px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md",
+            ),
+            rx.el.button(
                 rx.icon("share-2", class_name="mr-2 h-4 w-4"),
                 "Share Link",
                 on_click=[

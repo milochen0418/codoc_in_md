@@ -59,6 +59,14 @@ poetry env use /absolute/path/to/python3.11
 poetry install
 ```
 
+### 3.1) macOS system dependencies (PDF export)
+
+PDF export uses WeasyPrint, which requires native libraries on macOS.
+
+```bash
+brew install cairo pango gdk-pixbuf libffi
+```
+
 ### 4) Run the app
 
 ```bash

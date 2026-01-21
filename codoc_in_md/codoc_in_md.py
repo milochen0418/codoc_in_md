@@ -1,3 +1,4 @@
+import os
 import reflex as rx
 from reflex_monaco import monaco
 from codoc_in_md.state import EditorState
@@ -6,6 +7,7 @@ from codoc_in_md.components.sidebar import sidebar
 from codoc_in_md.components.markdown_clean import CleanMarkdown
 
 from codoc_in_md.embeds import register_backend_embed_routes
+from codoc_in_md.export_pdf import register_pdf_export_routes
 
 
 def editor_panel() -> rx.Component:
@@ -243,9 +245,13 @@ def index() -> rx.Component:
 app = rx.App(
     theme=rx.theme(appearance="light"),
     head_components=[
+        rx.el.script(
+            f"window.CODOC_BACKEND_BASE_URL = '{os.getenv('CODOC_BACKEND_BASE_URL', 'http://localhost:8000').rstrip('/')}'"
+        ),
         rx.el.script(src="/codoc_split.js", defer=True),
         rx.el.script(src="/fontawesome_fix.js", defer=True),
         rx.el.script(src="/fullscreen.js", defer=True),
+        rx.el.script(src="/export_pdf.js", defer=True),
         # HackMD commonly uses Font Awesome 4 markup like: <i class="fa fa-...">.
         # Load FA so those icons render in the preview.
         rx.el.link(
@@ -253,6 +259,7 @@ app = rx.App(
             href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css",
         ),
         rx.el.link(rel="stylesheet", href="/fullscreen.css"),
+        rx.el.link(rel="stylesheet", href="/print.css"),
         rx.el.link(rel="preconnect", href="https://fonts.googleapis.com"),
         rx.el.link(rel="preconnect", href="https://fonts.gstatic.com", crossorigin=""),
         rx.el.link(
@@ -266,3 +273,5 @@ app.add_page(index, route="/", on_load=EditorState.on_load)
 
 # Backend embed endpoints (used by fenced-block renderers like ```sequence```).
 register_backend_embed_routes(app)
+# PDF export endpoint (HackMD/CodiMD-like server-side export).
+register_pdf_export_routes(app)

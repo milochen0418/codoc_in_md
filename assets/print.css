@@ -1,0 +1,116 @@
+@media print {
+  @page {
+    size: auto;
+    margin: 12mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  main {
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  .h-screen {
+    height: auto !important;
+  }
+
+  .min-h-0 {
+    min-height: auto !important;
+  }
+
+  .overflow-hidden,
+  .overflow-y-auto,
+  .overflow-x-hidden {
+    overflow: visible !important;
+  }
+
+  header,
+  aside {
+    display: none !important;
+  }
+
+  #editor-pane,
+  #split-divider {
+    display: none !important;
+  }
+
+  #codoc-split {
+    grid-template-columns: 1fr !important;
+  }
+
+  #preview-pane {
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    background: #ffffff !important;
+  }
+
+  #preview-pane > div {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+}
+
+html.codoc-printing,
+body.codoc-printing {
+  background: #ffffff !important;
+  height: auto !important;
+  min-height: auto !important;
+  overflow: visible !important;
+}
+
+html.codoc-printing main {
+  height: auto !important;
+  min-height: auto !important;
+  overflow: visible !important;
+}
+
+html.codoc-printing .h-screen {
+  height: auto !important;
+}
+
+html.codoc-printing .min-h-0 {
+  min-height: auto !important;
+}
+
+html.codoc-printing .overflow-hidden,
+html.codoc-printing .overflow-y-auto,
+html.codoc-printing .overflow-x-hidden {
+  overflow: visible !important;
+}
+
+html.codoc-printing header,
+html.codoc-printing aside {
+  display: none !important;
+}
+
+html.codoc-printing #editor-pane,
+html.codoc-printing #split-divider {
+  display: none !important;
+}
+
+html.codoc-printing #codoc-split {
+  grid-template-columns: 1fr !important;
+}
+
+html.codoc-printing #preview-pane {
+  width: 100vw !important;
+  height: auto !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+}
+
+html.codoc-printing #preview-pane > div {
+  max-width: none !important;
+  padding: 32px !important;
+}

@@ -199,6 +199,24 @@ def _render_markdown_source(source: str) -> str:
     return apply_hackmd_code_blocks_with_lines(normalized)
 
 
+def render_markdown_for_export(source: str) -> str:
+    """Render markdown for export (PDF/HTML) without scroll markers."""
+
+    normalized = apply_hackmd_mathjax_delimiters(source)
+    normalized = apply_hackmd_code_fence_options(normalized)
+    normalized = apply_hackmd_toc_placeholder(normalized)
+    normalized = apply_hackmd_typography(normalized)
+    normalized = apply_hackmd_inline_extensions(normalized)
+    normalized = apply_hackmd_abbreviations(normalized)
+    normalized = apply_hackmd_fontawesome_icons(normalized)
+    normalized = apply_hackmd_emojis(normalized)
+    normalized = apply_hackmd_image_sizes(normalized)
+    normalized = apply_hackmd_embeds(normalized)
+    normalized = apply_hackmd_admonitions(normalized)
+    normalized = apply_hackmd_blockquote_labels(normalized)
+    return apply_hackmd_code_blocks_with_lines(normalized)
+
+
 class Document(TypedDict):
     doc_id: str
     content: str
