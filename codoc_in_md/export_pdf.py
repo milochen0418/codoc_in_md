@@ -90,6 +90,21 @@ pre {
 code {
   font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   font-size: 9.5pt;
+  background: #e5f0ff;
+  color: #0f172a;
+  padding: 1pt 3pt;
+  border-radius: 4pt;
+}
+
+mark {
+  background: #dbeafe;
+  color: #0f172a;
+  padding: 0 2pt;
+}
+
+a {
+  color: #2563eb;
+  text-decoration: underline;
 }
 
 img {
