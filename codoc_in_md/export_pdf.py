@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 from pathlib import Path
 
 from starlette.requests import Request
@@ -166,6 +167,16 @@ def register_pdf_export_routes(app) -> None:
             "</body></html>"
         )
 
+    def _content_disposition(filename: str) -> str:
+      safe_ascii = re.sub(r"[^\x20-\x7E]", "", filename).strip() or "document"
+      safe_ascii = safe_ascii.replace('"', "")
+      safe_ascii = _sanitize_filename(safe_ascii)
+      encoded = quote(filename)
+      return (
+        f'attachment; filename="{safe_ascii}.pdf"; '
+        f"filename*=UTF-8''{encoded}.pdf"
+      )
+
     def _api_export_pdf(request: Request) -> Response:
         doc_id = (request.query_params.get("doc_id") or "").strip()
         if not doc_id:
@@ -195,9 +206,7 @@ def register_pdf_export_routes(app) -> None:
         )
 
         filename = _sanitize_filename(title)
-        headers = {
-            "Content-Disposition": f'attachment; filename="{filename}.pdf"'
-        }
+        headers = {"Content-Disposition": _content_disposition(filename)}
         return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
 
     existing_paths = {getattr(r, "path", None) for r in getattr(app._api, "routes", [])}
