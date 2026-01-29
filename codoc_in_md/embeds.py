@@ -1313,7 +1313,7 @@ def apply_hackmd_mathjax_delimiters(markdown_text: str) -> str:
     mj_close_re = re.compile(r"^\s*\\\]\s*$")
 
     def _maybe_open_fence(line: str) -> tuple[str, int] | None:
-        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
         if not m:
             return None
         f = m.group("fence")
@@ -1323,7 +1323,7 @@ def apply_hackmd_mathjax_delimiters(markdown_text: str) -> str:
         if not ch or not ln:
             return False
         raw = line.rstrip("\n").rstrip("\r")
-        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
 
     def _rewrite_inline_math_delims(s: str) -> str:
         if not s:
@@ -1467,7 +1467,7 @@ def apply_hackmd_abbreviations(markdown_text: str) -> str:
     fence_len = 0
 
     def _maybe_open_fence(line: str) -> tuple[str, int] | None:
-        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
         if not m:
             return None
         f = m.group("fence")
@@ -1477,7 +1477,7 @@ def apply_hackmd_abbreviations(markdown_text: str) -> str:
         if not ch or not ln:
             return False
         raw = line.rstrip("\n").rstrip("\r")
-        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
 
     # 1) Extract definition lines, skipping code fences.
     for line in lines:
@@ -1585,7 +1585,7 @@ def apply_hackmd_abbreviations(markdown_text: str) -> str:
         return "".join(out2)
 
     text2 = "".join(kept)
-    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    fence_open_re = re.compile(r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
     math_fence_re = re.compile(r"^\s*\$\$\s*$")
     lines2 = text2.splitlines(keepends=True)
     i = 0
@@ -1722,7 +1722,7 @@ def apply_hackmd_inline_extensions(markdown_text: str) -> str:
                 out2.append(part if is_code else _apply_preserving_md_syntax(part))
         return "".join(out2)
 
-    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    fence_open_re = re.compile(r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
     math_fence_re = re.compile(r"^\s*\$\$\s*$")
     lines = text.splitlines(keepends=True)
     i = 0
@@ -2018,7 +2018,7 @@ def apply_hackmd_typography(markdown_text: str) -> str:
 
     # Robust fenced-block skipping: supports 3+ backticks/tildes and won't be confused by
     # longer fences like ````` used to show ``` literally.
-    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    fence_open_re = re.compile(r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
     math_fence_re = re.compile(r"^\s*\$\$\s*$")
     lines = text.splitlines(keepends=True)
     i = 0
@@ -2105,7 +2105,7 @@ def apply_hackmd_toc_placeholder(markdown_text: str) -> str:
     fence_len = 0
 
     def _maybe_open_fence(line: str) -> tuple[str, int] | None:
-        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
         if not m:
             return None
         fence = m.group("fence")
@@ -2115,7 +2115,7 @@ def apply_hackmd_toc_placeholder(markdown_text: str) -> str:
         if not ch or not ln:
             return False
         raw = line.rstrip("\n").rstrip("\r")
-        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
 
     for line in lines:
         if not in_code:
@@ -2274,7 +2274,7 @@ def apply_hackmd_code_fence_options(markdown_text: str) -> str:
     text = markdown_text or ""
     last_end_line: int | None = None
 
-    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    fence_open_re = re.compile(r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
     lines = text.splitlines(keepends=True)
     out: list[str] = []
     i = 0
@@ -2400,7 +2400,7 @@ def apply_hackmd_code_blocks_with_lines(markdown_text: str) -> str:
     }
 
     fence_open_re = re.compile(
-        r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
+        r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$"
     )
 
     lines = text.splitlines(keepends=True)
@@ -3382,6 +3382,7 @@ class PlantUmlBlock:
 
     def render(self, block: FencedCodeBlock) -> str | None:
         code = (block.code or "").strip("\r\n")
+        code = code.replace("\r\n", "\n").replace("\r", "\n")
         if not code.strip():
             return None
         encoded = self._encode_plantuml(code)
@@ -3443,7 +3444,7 @@ def apply_hackmd_embeds(markdown_text: str, *, extensions: dict[str, EmbedExtens
 
     out_parts: list[str] = []
 
-    fence_open_re = re.compile(r"^(?P<indent>\s{0,3})(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+    fence_open_re = re.compile(r"^(?P<indent>\s*)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
     lines = text.splitlines(keepends=True)
     i = 0
     buf: list[str] = []

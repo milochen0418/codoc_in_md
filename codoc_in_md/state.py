@@ -51,7 +51,7 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
     def _maybe_open_fence(line: str) -> tuple[str, int] | None:
         import re
 
-        m = re.match(r"^\s{0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
+        m = re.match(r"^\s*(?P<fence>`{3,}|~{3,})(?P<info>.*)$", line.rstrip("\n"))
         if not m:
             return None
         fence = m.group("fence")
@@ -63,7 +63,7 @@ def _inject_scroll_markers(source: str, *, every: int = 3) -> str:
         if not ch or not ln:
             return False
         raw = line.rstrip("\n").rstrip("\r")
-        return re.match(rf"^\s{{0,3}}{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
+        return re.match(rf"^\s*{re.escape(ch)}{{{ln},}}\s*$", raw) is not None
 
     def _marker(line_no: int) -> str:
         # display:block + height:0 means it takes no visible space but has a stable offsetTop.
