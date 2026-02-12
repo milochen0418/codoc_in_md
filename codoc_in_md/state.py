@@ -463,16 +463,9 @@ class EditorState(rx.State):
                 if display_users != self.users:
                     self.users = display_users
 
-            remote_doc = self._get_doc_from_db(current_doc_id)
-            async with self:
-                if remote_doc and remote_doc["version"] > self.last_version:
-                    if remote_doc["content"] != self.doc_content:
-                        self.doc_content = remote_doc["content"]
-                        self.doc_content_rendered = _render_markdown_source(self.doc_content)
-                        self.last_version = remote_doc["version"]
-                        # Remote overwrite: refresh the Monaco seed to match.
-                        self.editor_seed_content = self.doc_content
-                        self.editor_seed_version += 1
+            # Document sync is now handled by Yjs (CRDT) via
+            # assets/yjs_collab.js + the /yjs/{doc_id} WebSocket relay.
+            # Only presence tracking remains in this loop.
 
             await asyncio.sleep(0.5)
 

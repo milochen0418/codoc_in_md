@@ -8,6 +8,7 @@ from codoc_in_md.components.markdown_clean import CleanMarkdown
 
 from codoc_in_md.embeds import register_backend_embed_routes
 from codoc_in_md.export_pdf import register_pdf_export_routes
+from codoc_in_md.yjs_ws import register_yjs_routes
 
 
 def editor_panel() -> rx.Component:
@@ -252,6 +253,7 @@ app = rx.App(
         rx.el.script(src="/fontawesome_fix.js", defer=True),
         rx.el.script(src="/fullscreen.js", defer=True),
         rx.el.script(src="/export_pdf.js", defer=True),
+        rx.el.script(src="/yjs_collab.js", defer=True),
         # HackMD commonly uses Font Awesome 4 markup like: <i class="fa fa-...">.
         # Load FA so those icons render in the preview.
         rx.el.link(
@@ -275,3 +277,5 @@ app.add_page(index, route="/", on_load=EditorState.on_load)
 register_backend_embed_routes(app)
 # PDF export endpoint (HackMD/CodiMD-like server-side export).
 register_pdf_export_routes(app)
+# Yjs CRDT WebSocket relay for real-time collaboration.
+register_yjs_routes(app)
