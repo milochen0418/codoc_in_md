@@ -187,7 +187,10 @@
       /* --- initial value reconciliation --- */
       {
         const ytv = ytext.toString();
-        if (monacoModel.getValue() !== ytv) {
+        const mv = monacoModel.getValue();
+        console.log(`[codoc-yjs] MonacoBinding reconciliation: ytext.length=${ytv.length}, model.length=${mv.length}, will-overwrite=${mv !== ytv}`);
+        if (mv !== ytv) {
+          console.warn(`[codoc-yjs] MonacoBinding OVERWRITING model with ytext (ytext.len=${ytv.length}, model.len=${mv.length})`);
           monacoModel.setValue(ytv);
         }
       }
@@ -359,27 +362,33 @@
 
       // Connect to the backend Yjs relay.
       const wsBase = getWsBase();
+      console.log(`[codoc-yjs] setup("${docId}"): wsBase=${wsBase}`);
       provider = new WsProvider(wsBase, docId, ydoc);
 
       // Wait for sync (another client responds) or timeout (we're first).
+      const syncStart = Date.now();
       await new Promise((resolve) => {
-        if (provider.synced) { resolve(); return; }
+        if (provider.synced) { console.log("[codoc-yjs] already synced"); resolve(); return; }
         const onSync = (ev) => {
           if (ev && ev.synced !== undefined ? ev.synced : true) {
             provider.off("synced", onSync);
+            console.log(`[codoc-yjs] synced from peer in ${Date.now() - syncStart}ms, ytext.length=${ytext.length}`);
             resolve();
           }
         };
         provider.on("synced", onSync);
-        setTimeout(() => { provider.off("synced", onSync); resolve(); }, 2000);
+        setTimeout(() => { provider.off("synced", onSync); console.log(`[codoc-yjs] sync timeout (2s), ytext.length=${ytext.length}`); resolve(); }, 2000);
       });
 
       // First-client seed: if Y.Text is still empty, populate from Monaco.
       const editor = getEditor();
+      const modelVal = editor && editor.getModel() ? editor.getModel().getValue() : null;
+      console.log(`[codoc-yjs] post-sync state: ytext.length=${ytext.length}, editor=${!!editor}, model.length=${modelVal ? modelVal.length : 'null'}`);
       if (editor && ytext.length === 0) {
         const model = editor.getModel();
         if (model) {
           const content = model.getValue();
+          console.log(`[codoc-yjs] first-client seed: content.length=${content ? content.length : 0}`);
           if (content) {
             ydoc.transact(() => { ytext.insert(0, content); });
           }
@@ -390,6 +399,9 @@
       if (editor) {
         const model = editor.getModel();
         if (model) {
+          const ytv = ytext.toString();
+          const mv = model.getValue();
+          console.log(`[codoc-yjs] pre-binding: ytext.length=${ytv.length}, model.length=${mv.length}`);
           binding = new MonacoBinding(
             Y,
             window.monaco,
@@ -398,6 +410,8 @@
             new Set([editor]),
             provider.awareness,
           );
+          const mvAfter = model.getValue();
+          console.log(`[codoc-yjs] post-binding: model.length=${mvAfter.length}`);
         }
       }
 
@@ -422,6 +436,9 @@
 
     const { ytext, provider: prov } = window._codocYjs;
     const model = editor.getModel();
+    const ytLen = ytext ? ytext.toString().length : -1;
+    const mLen = model ? model.getValue().length : -1;
+    console.log(`[codoc-yjs] tryRebind: ytext.length=${ytLen}, model.length=${mLen}`);
     if (model && ytext) {
       binding = new MonacoBinding(
         Y,
@@ -444,14 +461,17 @@
 
     // Document changed → full re-setup.
     if (docId !== currentDocId) {
+      console.log(`[codoc-yjs] poll: docId changed (${currentDocId} → ${docId}), calling setup`);
       setup(docId);
       return;
     }
 
     const editor = getEditor();
     if (editor && !binding) {
+      console.log(`[codoc-yjs] poll: editor found but no binding, calling tryRebind`);
       tryRebind();
     } else if (!editor && binding) {
+      console.log(`[codoc-yjs] poll: editor gone but binding exists, destroying binding`);
       destroyBinding();
     }
   };

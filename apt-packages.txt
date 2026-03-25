@@ -9,6 +9,13 @@ libglib2.0-0
 libharfbuzz0b
 libfribidi0
 
-# All Noto fonts — full worldwide Unicode coverage
-# (CJK, Latin, Arabic, Hebrew, Thai, Emoji, etc.)
-fonts-noto
+# Noto fonts — full worldwide Unicode coverage
+# (fonts-noto only *Depends* on core; CJK/emoji/extra are Recommends,
+#  which --no-install-recommends skips, so list them explicitly)
+fonts-noto-core
+fonts-noto-cjk
+fonts-noto-extra
+fonts-noto-color-emoji
+fonts-noto-mono
+fonts-noto-ui-core
+fonts-noto-ui-extra
