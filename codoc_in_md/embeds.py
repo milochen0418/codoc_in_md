@@ -1057,10 +1057,23 @@ _OEMBED_TTL_S = 60 * 60 * 24
 def _backend_base_url() -> str:
     """Base URL for the Reflex backend (used by embed iframes).
 
-    Default matches Reflex dev backend port. Override via env for other deployments.
+    Resolution order:
+      1. ``CODOC_BACKEND_BASE_URL`` environment variable (explicit override).
+      2. Reflex ``api_url`` from rxconfig.py (set by smart-launcher etc.).
+      3. ``http://localhost:8000`` (local dev fallback).
     """
-
-    return os.getenv("CODOC_BACKEND_BASE_URL", "http://localhost:8000").rstrip("/")
+    env_val = os.getenv("CODOC_BACKEND_BASE_URL", "").strip()
+    if env_val:
+        return env_val.rstrip("/")
+    # Try Reflex config — works when api_url is set (e.g. behind a proxy).
+    try:
+        import reflex as rx  # noqa: E402 – lazy import to avoid side-effects
+        api_url = rx.config.get_config().api_url
+        if api_url:
+            return str(api_url).rstrip("/")
+    except Exception:
+        pass
+    return "http://localhost:8000"
 
 
 def _encode_code_b64(code: str) -> str:

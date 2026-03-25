@@ -6,6 +6,7 @@ from codoc_in_md.components.header import header
 from codoc_in_md.components.sidebar import sidebar
 from codoc_in_md.components.markdown_clean import CleanMarkdown
 
+from codoc_in_md import embeds
 from codoc_in_md.embeds import register_backend_embed_routes
 from codoc_in_md.export_pdf import register_pdf_export_routes
 from codoc_in_md.yjs_ws import register_yjs_routes
@@ -247,7 +248,7 @@ app = rx.App(
     theme=rx.theme(appearance="light"),
     head_components=[
         rx.el.script(
-            f"window.CODOC_BACKEND_BASE_URL = '{os.getenv('CODOC_BACKEND_BASE_URL', 'http://localhost:8000').rstrip('/')}'"
+            f"window.CODOC_BACKEND_BASE_URL = '{embeds._backend_base_url()}'"
         ),
         rx.el.script(src="/codoc_split.js", defer=True),
         rx.el.script(src="/fontawesome_fix.js", defer=True),
