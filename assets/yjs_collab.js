@@ -272,10 +272,20 @@
 
   /** Derive the WebSocket URL for the Yjs relay on the backend. */
   const getWsBase = () => {
+    // When behind a reverse proxy, CODOC_BACKEND_BASE_URL is the canonical
+    // external URL (e.g. https://md.reflex-ddns.com).  Derive WebSocket URL
+    // from it so the browser connects through nginx, not to localhost.
+    const backendBase = window.CODOC_BACKEND_BASE_URL;
+    if (backendBase) {
+      const url = new URL(backendBase);
+      const wsProt = url.protocol === "https:" ? "wss:" : "ws:";
+      const portPart = url.port ? ":" + url.port : "";
+      return `${wsProt}//${url.hostname}${portPart}/yjs`;
+    }
+    // Fallback: local dev (frontend on 3000 → backend on 8000).
     const { protocol, hostname } = window.location;
     const port = window.location.port;
     const wsProt = protocol === "https:" ? "wss:" : "ws:";
-    // Dev: frontend on 3000 → backend on 8000.
     const backendPort = port === "3000" ? "8000" : port;
     return `${wsProt}//${hostname}${backendPort ? ":" + backendPort : ""}/yjs`;
   };
