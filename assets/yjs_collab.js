@@ -238,12 +238,12 @@
     }
 
     destroy() {
-      this._monacoChangeHandler.dispose();
-      this._monacoDisposeHandler.dispose();
-      this.ytext.unobserve(this._ytextObserver);
-      this.doc.off("beforeAllTransactions", this._beforeTransaction);
+      try { this._monacoChangeHandler.dispose(); } catch {}
+      try { this._monacoDisposeHandler.dispose(); } catch {}
+      try { this.ytext.unobserve(this._ytextObserver); } catch {}
+      try { this.doc.off("beforeAllTransactions", this._beforeTransaction); } catch {}
       if (this.awareness) {
-        this.awareness.off("change", this._rerenderDecorations);
+        try { this.awareness.off("change", this._rerenderDecorations); } catch {}
       }
     }
   }
@@ -416,7 +416,7 @@
       }
 
       // Store for rebinding after Monaco remounts.
-      window._codocYjs = { ytext, provider };
+      window._codocYjs = { ytext, provider, ydoc };
       setupErrors = 0; // success resets error counter
     } catch (err) {
       setupErrors++;
@@ -434,21 +434,30 @@
 
     destroyBinding();
 
-    const { ytext, provider: prov } = window._codocYjs;
+    const { ytext, provider: prov, ydoc: yd } = window._codocYjs;
     const model = editor.getModel();
-    const ytLen = ytext ? ytext.toString().length : -1;
-    const mLen = model ? model.getValue().length : -1;
+    if (!model || !ytext) return;
+
+    const ytLen = ytext.toString().length;
+    const mLen = model.getValue().length;
     console.log(`[codoc-yjs] tryRebind: ytext.length=${ytLen}, model.length=${mLen}`);
-    if (model && ytext) {
-      binding = new MonacoBinding(
-        Y,
-        window.monaco,
-        ytext,
-        model,
-        new Set([editor]),
-        prov ? prov.awareness : null,
-      );
+
+    // Deferred first-client seed: if setup() could not seed because Monaco
+    // was not mounted yet, do it now before creating the binding.
+    if (ytext.length === 0 && mLen > 0 && yd) {
+      const content = model.getValue();
+      console.log(`[codoc-yjs] tryRebind: deferred seed from model (${content.length} chars)`);
+      yd.transact(() => { ytext.insert(0, content); });
     }
+
+    binding = new MonacoBinding(
+      Y,
+      window.monaco,
+      ytext,
+      model,
+      new Set([editor]),
+      prov ? prov.awareness : null,
+    );
   };
 
   /* ================================================================== */
