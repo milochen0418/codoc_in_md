@@ -9,3 +9,6 @@ libglib2.0-0
 libharfbuzz0b
 libfribidi0
 fonts-dejavu-core
+
+# CJK fonts for Chinese/Japanese/Korean PDF rendering
+fonts-noto-cjk
