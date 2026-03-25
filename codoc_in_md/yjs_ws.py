@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 
+from starlette.routing import WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
@@ -65,4 +66,4 @@ def register_yjs_routes(app) -> None:  # noqa: ANN001 – Reflex App
 
     existing = {getattr(r, "path", None) for r in getattr(app._api, "routes", [])}
     if "/yjs/{doc_id}" not in existing:
-        app._api.add_websocket_route("/yjs/{doc_id}", _yjs_ws_endpoint)
+        app._api.routes.append(WebSocketRoute("/yjs/{doc_id}", _yjs_ws_endpoint))
