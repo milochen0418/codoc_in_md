@@ -1,0 +1,11 @@
+# Extra URL paths that should be proxied to the backend (FastAPI) port
+# instead of the frontend (Vite/static) port.
+# One path per line. Comments (#) and blank lines are ignored.
+
+# Embed & export API endpoints
+/__embed
+/__export
+
+# Yjs CRDT WebSocket relay (collaborative editing).
+# Trailing slash prevents matching static assets like /yjs_collab.js.
+/yjs/
