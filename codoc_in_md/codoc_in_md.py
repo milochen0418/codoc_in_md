@@ -2,9 +2,11 @@ import os
 import reflex as rx
 from reflex_monaco import monaco
 from codoc_in_md.state import EditorState
+from codoc_in_md.state import DocListState
 from codoc_in_md.components.header import header
 from codoc_in_md.components.sidebar import sidebar
 from codoc_in_md.components.markdown_clean import CleanMarkdown
+from codoc_in_md.components.doc_list import doc_list_page
 
 from codoc_in_md import embeds
 from codoc_in_md.embeds import register_backend_embed_routes
@@ -272,7 +274,7 @@ app = rx.App(
     ],
 )
 app.add_page(index, route="/doc/[document_id]", on_load=EditorState.on_load)
-app.add_page(index, route="/", on_load=EditorState.on_load)
+app.add_page(doc_list_page, route="/", on_load=DocListState.load_documents)
 
 # Backend embed endpoints (used by fenced-block renderers like ```sequence```).
 register_backend_embed_routes(app)

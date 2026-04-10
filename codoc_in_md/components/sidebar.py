@@ -28,8 +28,15 @@ def sidebar() -> rx.Component:
                 class_name="w-full text-left flex items-center px-4 py-2 text-sm font-medium text-violet-700 bg-violet-50 hover:bg-violet-100 rounded-md mb-2",
             ),
             rx.el.button(
+                rx.icon("copy", class_name="mr-2 h-4 w-4"),
+                "Duplicate",
+                on_click=EditorState.duplicate_document,
+                class_name="w-full text-left flex items-center px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md mb-2",
+            ),
+            rx.el.button(
                 rx.icon("download", class_name="mr-2 h-4 w-4"),
                 "Export as Markdown",
+                on_click=EditorState.export_markdown,
                 class_name="w-full text-left flex items-center px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 rounded-md",
             ),
             rx.el.button(
