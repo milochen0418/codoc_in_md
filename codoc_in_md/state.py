@@ -1,4 +1,6 @@
+import re as _re
 import reflex as rx
+import sqlmodel
 import asyncio
 import time
 import random
@@ -217,11 +219,116 @@ def render_markdown_for_export(source: str) -> str:
     return apply_hackmd_code_blocks_with_lines(normalized)
 
 
+def _extract_title(content: str) -> str:
+    """Extract the first markdown heading as document title."""
+    for line in (content or "").splitlines():
+        m = _re.match(r"^\s{0,3}(#{1,6})\s+(.+)", line)
+        if m:
+            return m.group(2).strip()[:100]
+    return "Untitled"
+
+
+class DocumentModel(rx.Model, table=True):
+    """Persistent document storage."""
+    doc_id: str = sqlmodel.Field(index=True, unique=True)
+    title: str = ""
+    content: str = ""
+    updated_at: float = 0.0
+    version: int = 1
+
+
 class Document(TypedDict):
     doc_id: str
+    title: str
     content: str
     updated_at: float
     version: int
+
+
+class _DocumentStore:
+    """Dict-like facade backed by the database.
+
+    Keeps the same interface as the original ``dict[str, Document]``
+    so callers don't need to know about the persistence layer.
+    Swap out the implementation here to switch databases.
+    """
+
+    @staticmethod
+    def _to_document(row: DocumentModel) -> Document:
+        return Document(
+            doc_id=row.doc_id,
+            title=row.title or _extract_title(row.content),
+            content=row.content,
+            updated_at=row.updated_at,
+            version=row.version,
+        )
+
+    def get(self, doc_id: str) -> Optional[Document]:
+        with rx.session() as session:
+            row = session.exec(
+                DocumentModel.select().where(DocumentModel.doc_id == doc_id)
+            ).first()
+            return self._to_document(row) if row else None
+
+    def __contains__(self, doc_id: str) -> bool:
+        return self.get(doc_id) is not None
+
+    def __getitem__(self, doc_id: str) -> Document:
+        doc = self.get(doc_id)
+        if doc is None:
+            raise KeyError(doc_id)
+        return doc
+
+    def __setitem__(self, doc_id: str, doc: Document):
+        title = doc.get("title") or _extract_title(doc.get("content", ""))
+        with rx.session() as session:
+            row = session.exec(
+                DocumentModel.select().where(DocumentModel.doc_id == doc_id)
+            ).first()
+            if row is None:
+                row = DocumentModel(
+                    doc_id=doc_id,
+                    title=title,
+                    content=doc.get("content", ""),
+                    updated_at=doc.get("updated_at", 0.0),
+                    version=doc.get("version", 1),
+                )
+                session.add(row)
+            else:
+                row.content = doc.get("content", "")
+                row.title = title
+                row.updated_at = doc.get("updated_at", 0.0)
+                row.version = doc.get("version", 1)
+                session.add(row)
+            session.commit()
+
+    def __delitem__(self, doc_id: str):
+        with rx.session() as session:
+            row = session.exec(
+                DocumentModel.select().where(DocumentModel.doc_id == doc_id)
+            ).first()
+            if row:
+                session.delete(row)
+                session.commit()
+
+    def values(self) -> list[Document]:
+        """Return all documents, most-recently-updated first."""
+        with rx.session() as session:
+            rows = session.exec(
+                DocumentModel.select().order_by(DocumentModel.updated_at.desc())
+            ).all()
+            return [self._to_document(r) for r in rows]
+
+    def clear(self):
+        """Delete every document (useful for testing)."""
+        with rx.session() as session:
+            rows = session.exec(DocumentModel.select()).all()
+            for row in rows:
+                session.delete(row)
+            session.commit()
+
+
+DOCUMENTS_STORE = _DocumentStore()
 
 
 class User(TypedDict):
@@ -237,7 +344,11 @@ class DisplayUser(TypedDict):
     color: str
 
 
-DOCUMENTS_STORE: dict[str, Document] = {}
+class DocListItem(TypedDict):
+    doc_id: str
+    title: str
+    updated_at: float
+    formatted_time: str
 
 
 FIXTURE_DOCS: dict[str, str] = {
@@ -348,15 +459,16 @@ class EditorState(rx.State):
         return rx.redirect(f"/doc/{new_id}")
 
     def _get_doc_from_db(self, doc_id: str) -> Optional[Document]:
-        """Helper to fetch document from in-memory store."""
+        """Helper to fetch document from the store."""
         return DOCUMENTS_STORE.get(doc_id)
 
     def _save_doc_to_db(self, doc_id: str, content: str):
-        """Helper to save document to in-memory store."""
+        """Helper to save document to the store."""
         now = time.time()
         if doc_id not in DOCUMENTS_STORE:
             doc: Document = {
                 "doc_id": doc_id,
+                "title": _extract_title(content),
                 "content": content,
                 "updated_at": now,
                 "version": 1,
@@ -366,8 +478,10 @@ class EditorState(rx.State):
         else:
             doc = DOCUMENTS_STORE[doc_id]
             doc["content"] = content
+            doc["title"] = _extract_title(content)
             doc["updated_at"] = now
             doc["version"] += 1
+            DOCUMENTS_STORE[doc_id] = doc
             self.last_version = doc["version"]
 
     @rx.event(background=True)
@@ -496,3 +610,39 @@ class EditorState(rx.State):
     def user_count(self) -> int:
         """Returns the number of connected users."""
         return len(self.users)
+
+
+class DocListState(rx.State):
+    """State for the document management page."""
+
+    documents: list[DocListItem] = []
+
+    @rx.event
+    def load_documents(self):
+        """Load all documents, sorted by updated_at descending."""
+        import datetime
+        docs = DOCUMENTS_STORE.values()
+        self.documents = [
+            DocListItem(
+                doc_id=d["doc_id"],
+                title=d.get("title") or _extract_title(d["content"]),
+                updated_at=d["updated_at"],
+                formatted_time=(
+                    datetime.datetime.fromtimestamp(d["updated_at"]).strftime("%Y-%m-%d %H:%M")
+                    if d["updated_at"] > 0 else ""
+                ),
+            )
+            for d in docs
+        ]
+
+    @rx.event
+    def delete_document(self, doc_id: str):
+        """Delete a single document and refresh the list."""
+        del DOCUMENTS_STORE[doc_id]
+        self.load_documents()
+
+    @rx.event
+    def clear_all_documents(self):
+        """Delete ALL documents."""
+        DOCUMENTS_STORE.clear()
+        self.documents = []

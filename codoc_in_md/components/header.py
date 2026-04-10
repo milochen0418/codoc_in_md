@@ -74,7 +74,12 @@ def header() -> rx.Component:
     """The application header, displaying users and document title."""
     return rx.el.header(
         rx.el.div(
-            rx.icon("file-text", class_name="h-6 w-6 text-violet-600"),
+            rx.el.a(
+                rx.icon("file-text", class_name="h-6 w-6 text-violet-600"),
+                href="/",
+                title="Back to Documents",
+                class_name="hover:opacity-80 transition-opacity",
+            ),
             rx.el.div(
                 rx.el.h1(
                     "Collaborative Doc", class_name="text-xl font-bold text-gray-900"
