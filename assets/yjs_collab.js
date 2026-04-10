@@ -374,32 +374,9 @@
         setTimeout(() => { provider.off("synced", onSync); resolve(); }, 2000);
       });
 
-      // First-client seed: if Y.Text is still empty, populate from Monaco.
-      const editor = getEditor();
-      if (editor && ytext.length === 0) {
-        const model = editor.getModel();
-        if (model) {
-          const content = model.getValue();
-          if (content) {
-            ydoc.transact(() => { ytext.insert(0, content); });
-          }
-        }
-      }
-
-      // Bind Y.Text ↔ Monaco (using vendored MonacoBinding).
-      if (editor) {
-        const model = editor.getModel();
-        if (model) {
-          binding = new MonacoBinding(
-            Y,
-            window.monaco,
-            ytext,
-            model,
-            new Set([editor]),
-            provider.awareness,
-          );
-        }
-      }
+      // First-client seed and Monaco binding are deferred to tryRebind()
+      // so that we always read from the freshly (re)mounted Monaco model
+      // rather than a stale model that hasn't re-rendered yet.
 
       // Store for rebinding after Monaco remounts.
       window._codocYjs = { ytext, provider, ydoc };

@@ -70,6 +70,85 @@ def view_toggle() -> rx.Component:
     )
 
 
+def _dropdown_menu_cls() -> str:
+    return (
+        "absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 "
+        "rounded-lg shadow-lg py-1 z-50 hidden group-hover:block"
+    )
+
+
+def _dropdown_item_cls() -> str:
+    return (
+        "w-full text-left flex items-center gap-2 px-4 py-2 text-sm text-gray-700 "
+        "hover:bg-gray-50 transition-colors cursor-pointer"
+    )
+
+
+def _header_btn_cls() -> str:
+    return (
+        "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 "
+        "hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+    )
+
+
+def document_dropdown() -> rx.Component:
+    """Document dropdown: New / Duplicate."""
+    return rx.el.div(
+        rx.el.button(
+            rx.icon("file-text", class_name="h-4 w-4"),
+            "Document",
+            rx.icon("chevron-down", class_name="h-3 w-3 opacity-50"),
+            class_name=_header_btn_cls(),
+        ),
+        rx.el.div(
+            rx.el.button(
+                rx.icon("plus", class_name="h-4 w-4"),
+                "New",
+                on_click=EditorState.create_new_document,
+                class_name=_dropdown_item_cls(),
+            ),
+            rx.el.button(
+                rx.icon("copy", class_name="h-4 w-4"),
+                "Duplicate",
+                on_click=EditorState.duplicate_document,
+                class_name=_dropdown_item_cls(),
+            ),
+            class_name=_dropdown_menu_cls(),
+        ),
+        class_name="relative group",
+    )
+
+
+def export_dropdown() -> rx.Component:
+    """Export dropdown: Markdown / PDF."""
+    return rx.el.div(
+        rx.el.button(
+            rx.icon("download", class_name="h-4 w-4"),
+            "Export",
+            rx.icon("chevron-down", class_name="h-3 w-3 opacity-50"),
+            class_name=_header_btn_cls(),
+        ),
+        rx.el.div(
+            rx.el.button(
+                rx.icon("file-text", class_name="h-4 w-4"),
+                "Markdown",
+                on_click=EditorState.export_markdown,
+                class_name=_dropdown_item_cls(),
+            ),
+            rx.el.button(
+                rx.icon("file-output", class_name="h-4 w-4"),
+                "PDF",
+                on_click=rx.call_script(
+                    "window.codocExportPdf && window.codocExportPdf()"
+                ),
+                class_name=_dropdown_item_cls(),
+            ),
+            class_name=_dropdown_menu_cls(),
+        ),
+        class_name="relative group",
+    )
+
+
 def header() -> rx.Component:
     """The application header, displaying users and document title."""
     return rx.el.header(
@@ -106,8 +185,10 @@ def header() -> rx.Component:
                 rx.foreach(EditorState.users, user_avatar),
                 class_name="flex -space-x-2 mr-4",
             ),
+            document_dropdown(),
+            export_dropdown(),
             rx.el.button(
-                rx.icon("share-2", class_name="mr-2 h-4 w-4"),
+                rx.icon("share-2", class_name="h-4 w-4"),
                 "Share Link",
                 on_click=[
                     rx.call_script(
@@ -119,9 +200,9 @@ def header() -> rx.Component:
                         position="bottom-right",
                     ),
                 ],
-                class_name="bg-violet-600 text-white px-4 py-2 rounded-lg hover:bg-violet-700 transition-colors flex items-center font-medium shadow-sm cursor-pointer active:scale-95",
+                class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors cursor-pointer active:scale-95",
             ),
-            class_name="flex items-center",
+            class_name="flex items-center gap-2",
         ),
         class_name="h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between border-b border-gray-200 bg-white shadow-sm",
     )

@@ -454,8 +454,32 @@ class EditorState(rx.State):
 
     @rx.event
     def create_new_document(self):
-        """Creates a new document and redirects to it."""
+        """Creates a new empty document and redirects to it."""
         new_id = str(uuid.uuid4())[:8]
+        default_content = "# Start typing your masterpiece..."
+        # Stop any running background sync loop for the old doc.
+        self.is_syncing = False
+        # Prepare fresh state so the editor shows clean content immediately,
+        # even if on_load doesn't re-fire (same route pattern SPA navigation).
+        self.doc_id = new_id
+        self.doc_content = default_content
+        self.doc_content_rendered = _render_markdown_source(default_content)
+        self._save_doc_to_db(new_id, default_content)
+        self.last_version = 1
+        self.editor_seed_content = default_content
+        self.editor_seed_version += 1
+        return rx.redirect(f"/doc/{new_id}")
+
+    @rx.event
+    def duplicate_document(self):
+        """Duplicates the current document into a new one and redirects to it."""
+        new_id = str(uuid.uuid4())[:8]
+        # Stop any running background sync loop for the old doc.
+        self.is_syncing = False
+        self._save_doc_to_db(new_id, self.doc_content)
+        self.doc_id = new_id
+        self.editor_seed_content = self.doc_content
+        self.editor_seed_version += 1
         return rx.redirect(f"/doc/{new_id}")
 
     def _get_doc_from_db(self, doc_id: str) -> Optional[Document]:
@@ -590,6 +614,12 @@ class EditorState(rx.State):
         self.doc_content = new_content
         self.doc_content_rendered = _render_markdown_source(new_content)
         self._save_doc_to_db(self.doc_id, new_content)
+
+    @rx.event
+    def export_markdown(self):
+        """Download the current document as a .md file."""
+        filename = f"{self.doc_id}.md"
+        return rx.download(data=self.doc_content, filename=filename)
 
     @rx.event
     def set_view_mode(self, mode: str):
