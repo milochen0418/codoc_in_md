@@ -213,6 +213,12 @@ def header() -> rx.Component:
                 ],
                 class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors cursor-pointer active:scale-95",
             ),
+            rx.el.a(
+                rx.icon("folder-open", class_name="h-4 w-4"),
+                "My Documents",
+                href="/",
+                class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer",
+            ),
             class_name="flex items-center gap-2",
         ),
         class_name="h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between border-b border-gray-200 bg-white shadow-sm",
