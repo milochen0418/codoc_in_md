@@ -72,8 +72,13 @@ def view_toggle() -> rx.Component:
 
 def _dropdown_menu_cls() -> str:
     return (
-        "absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 "
-        "rounded-lg shadow-lg py-1 z-50 hidden group-hover:block"
+        "absolute right-0 top-full pt-2 w-44 z-50 hidden group-hover:block"
+    )
+
+
+def _dropdown_inner_cls() -> str:
+    return (
+        "bg-white border border-gray-200 rounded-lg shadow-lg py-1"
     )
 
 
@@ -101,17 +106,20 @@ def document_dropdown() -> rx.Component:
             class_name=_header_btn_cls(),
         ),
         rx.el.div(
-            rx.el.button(
-                rx.icon("plus", class_name="h-4 w-4"),
-                "New",
-                on_click=EditorState.create_new_document,
-                class_name=_dropdown_item_cls(),
-            ),
-            rx.el.button(
-                rx.icon("copy", class_name="h-4 w-4"),
-                "Duplicate",
-                on_click=EditorState.duplicate_document,
-                class_name=_dropdown_item_cls(),
+            rx.el.div(
+                rx.el.button(
+                    rx.icon("plus", class_name="h-4 w-4"),
+                    "New",
+                    on_click=EditorState.create_new_document,
+                    class_name=_dropdown_item_cls(),
+                ),
+                rx.el.button(
+                    rx.icon("copy", class_name="h-4 w-4"),
+                    "Duplicate",
+                    on_click=EditorState.duplicate_document,
+                    class_name=_dropdown_item_cls(),
+                ),
+                class_name=_dropdown_inner_cls(),
             ),
             class_name=_dropdown_menu_cls(),
         ),
@@ -129,19 +137,22 @@ def export_dropdown() -> rx.Component:
             class_name=_header_btn_cls(),
         ),
         rx.el.div(
-            rx.el.button(
-                rx.icon("file-text", class_name="h-4 w-4"),
-                "Markdown",
-                on_click=EditorState.export_markdown,
-                class_name=_dropdown_item_cls(),
-            ),
-            rx.el.button(
-                rx.icon("file-output", class_name="h-4 w-4"),
-                "PDF",
-                on_click=rx.call_script(
-                    "window.codocExportPdf && window.codocExportPdf()"
+            rx.el.div(
+                rx.el.button(
+                    rx.icon("file-text", class_name="h-4 w-4"),
+                    "Markdown",
+                    on_click=EditorState.export_markdown,
+                    class_name=_dropdown_item_cls(),
                 ),
-                class_name=_dropdown_item_cls(),
+                rx.el.button(
+                    rx.icon("file-output", class_name="h-4 w-4"),
+                    "PDF",
+                    on_click=rx.call_script(
+                        "window.codocExportPdf && window.codocExportPdf()"
+                    ),
+                    class_name=_dropdown_item_cls(),
+                ),
+                class_name=_dropdown_inner_cls(),
             ),
             class_name=_dropdown_menu_cls(),
         ),
