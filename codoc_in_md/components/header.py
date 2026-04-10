@@ -22,6 +22,24 @@ def user_avatar(user: dict) -> rx.Component:
     )
 
 
+def sidebar_toggle() -> rx.Component:
+    """A button to toggle the sidebar open/closed. Hidden on mobile."""
+    return rx.el.button(
+        rx.cond(
+            EditorState.sidebar_open,
+            rx.icon("panel-left-close", class_name="h-4 w-4"),
+            rx.icon("panel-left-open", class_name="h-4 w-4"),
+        ),
+        on_click=EditorState.set_sidebar_open(~EditorState.sidebar_open),
+        title=rx.cond(
+            EditorState.sidebar_open,
+            "Hide sidebar",
+            "Show sidebar",
+        ),
+        class_name="p-2 rounded-md text-gray-500 hover:bg-gray-100 transition-colors hidden md:block",
+    )
+
+
 def view_toggle() -> rx.Component:
     """Toggle buttons for switching between editor, split, and preview views."""
     button_base = "p-2 rounded-md transition-colors"
@@ -160,66 +178,184 @@ def export_dropdown() -> rx.Component:
     )
 
 
+def _mobile_menu_item_cls() -> str:
+    return (
+        "w-full text-left flex items-center gap-3 px-4 py-3 text-sm font-medium "
+        "text-gray-700 hover:bg-gray-50 transition-colors"
+    )
+
+
+def mobile_menu_button() -> rx.Component:
+    """Hamburger button shown only on mobile."""
+    return rx.el.button(
+        rx.cond(
+            EditorState.mobile_menu_open,
+            rx.icon("x", class_name="h-5 w-5"),
+            rx.icon("menu", class_name="h-5 w-5"),
+        ),
+        on_click=EditorState.set_mobile_menu_open(~EditorState.mobile_menu_open),
+        class_name="p-2 rounded-md text-gray-500 hover:bg-gray-100 transition-colors md:hidden",
+    )
+
+
+def mobile_menu_panel() -> rx.Component:
+    """Full-width dropdown panel for mobile, shown below the header."""
+    return rx.cond(
+        EditorState.mobile_menu_open,
+        rx.el.div(
+            # View mode section
+            rx.el.div(
+                rx.el.p("View", class_name="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-2"),
+                rx.el.button(
+                    rx.icon("pencil", class_name="h-4 w-4"),
+                    "Editor Only",
+                    on_click=[EditorState.set_view_mode("editor"), EditorState.set_mobile_menu_open(False)],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                rx.el.button(
+                    rx.icon("columns-2", class_name="h-4 w-4"),
+                    "Split View",
+                    on_click=[EditorState.set_view_mode("split"), EditorState.set_mobile_menu_open(False)],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                rx.el.button(
+                    rx.icon("eye", class_name="h-4 w-4"),
+                    "Preview Only",
+                    on_click=[EditorState.set_view_mode("preview"), EditorState.set_mobile_menu_open(False)],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                class_name="border-b border-gray-100",
+            ),
+            # Document section
+            rx.el.div(
+                rx.el.p("Document", class_name="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-2"),
+                rx.el.button(
+                    rx.icon("plus", class_name="h-4 w-4"),
+                    "New Document",
+                    on_click=[EditorState.create_new_document, EditorState.set_mobile_menu_open(False)],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                rx.el.button(
+                    rx.icon("copy", class_name="h-4 w-4"),
+                    "Duplicate",
+                    on_click=[EditorState.duplicate_document, EditorState.set_mobile_menu_open(False)],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                class_name="border-b border-gray-100",
+            ),
+            # Export section
+            rx.el.div(
+                rx.el.p("Export", class_name="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-2"),
+                rx.el.button(
+                    rx.icon("file-text", class_name="h-4 w-4"),
+                    "Markdown",
+                    on_click=[EditorState.export_markdown, EditorState.set_mobile_menu_open(False)],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                rx.el.button(
+                    rx.icon("file-output", class_name="h-4 w-4"),
+                    "PDF",
+                    on_click=[
+                        rx.call_script("window.codocExportPdf && window.codocExportPdf()"),
+                        EditorState.set_mobile_menu_open(False),
+                    ],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                class_name="border-b border-gray-100",
+            ),
+            # Other actions
+            rx.el.div(
+                rx.el.button(
+                    rx.icon("share-2", class_name="h-4 w-4"),
+                    "Share Link",
+                    on_click=[
+                        rx.call_script("navigator.clipboard.writeText(window.location.href)"),
+                        rx.toast.success("Link copied!", duration=3000, position="bottom-right"),
+                        EditorState.set_mobile_menu_open(False),
+                    ],
+                    class_name=_mobile_menu_item_cls(),
+                ),
+                rx.el.a(
+                    rx.icon("folder-open", class_name="h-4 w-4"),
+                    "My Documents",
+                    href="/",
+                    class_name=_mobile_menu_item_cls(),
+                ),
+            ),
+            class_name="absolute top-full left-0 right-0 bg-white border-b border-gray-200 shadow-lg z-50 md:hidden",
+        ),
+    )
+
+
 def header() -> rx.Component:
     """The application header, displaying users and document title."""
     return rx.el.header(
+        # --- Top bar ---
         rx.el.div(
-            rx.el.a(
-                rx.icon("file-text", class_name="h-6 w-6 text-violet-600"),
-                href="/",
-                title="Back to Documents",
-                class_name="hover:opacity-80 transition-opacity",
-            ),
             rx.el.div(
-                rx.el.h1(
-                    "Collaborative Doc", class_name="text-xl font-bold text-gray-900"
+                sidebar_toggle(),
+                rx.el.div(class_name="w-px h-6 bg-gray-200 hidden md:block"),
+                rx.el.a(
+                    rx.icon("file-text", class_name="h-6 w-6 text-violet-600"),
+                    href="/",
+                    title="Back to Documents",
+                    class_name="hover:opacity-80 transition-opacity",
                 ),
                 rx.el.div(
-                    rx.cond(
-                        EditorState.is_connected,
-                        rx.el.span("● Live", class_name="text-green-500 mr-1"),
-                        rx.el.span(
-                            "○ Connecting...", class_name="text-yellow-500 mr-1"
+                    rx.el.h1(
+                        "Collaborative Doc", class_name="text-xl font-bold text-gray-900 hidden sm:block"
+                    ),
+                    rx.el.h1(
+                        "CoDoc", class_name="text-lg font-bold text-gray-900 sm:hidden"
+                    ),
+                    rx.el.div(
+                        rx.cond(
+                            EditorState.is_connected,
+                            rx.el.span("● Live", class_name="text-green-500 mr-1"),
+                            rx.el.span("○ Connecting...", class_name="text-yellow-500 mr-1"),
                         ),
+                        rx.el.span(
+                            f"{EditorState.user_count} active", class_name="text-gray-500"
+                        ),
+                        class_name="text-xs font-medium flex items-center",
                     ),
-                    rx.el.span(
-                        f"{EditorState.user_count} active", class_name="text-gray-500"
-                    ),
-                    class_name="text-xs font-medium flex items-center",
                 ),
+                view_toggle(),
+                class_name="flex items-center gap-3",
             ),
-            view_toggle(),
-            class_name="flex items-center gap-3",
-        ),
-        rx.el.div(
             rx.el.div(
-                rx.foreach(EditorState.users, user_avatar),
-                class_name="flex -space-x-2 mr-4",
-            ),
-            document_dropdown(),
-            export_dropdown(),
-            rx.el.button(
-                rx.icon("share-2", class_name="h-4 w-4"),
-                "Share Link",
-                on_click=[
-                    rx.call_script(
-                        "navigator.clipboard.writeText(window.location.href)"
+                # Desktop actions (hidden on mobile)
+                rx.el.div(
+                    rx.el.div(
+                        rx.foreach(EditorState.users, user_avatar),
+                        class_name="flex -space-x-2 mr-4",
                     ),
-                    rx.toast.success(
-                        "Link copied to clipboard!",
-                        duration=3000,
-                        position="bottom-right",
+                    document_dropdown(),
+                    export_dropdown(),
+                    rx.el.button(
+                        rx.icon("share-2", class_name="h-4 w-4"),
+                        "Share Link",
+                        on_click=[
+                            rx.call_script("navigator.clipboard.writeText(window.location.href)"),
+                            rx.toast.success("Link copied to clipboard!", duration=3000, position="bottom-right"),
+                        ],
+                        class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors cursor-pointer active:scale-95",
                     ),
-                ],
-                class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors cursor-pointer active:scale-95",
+                    rx.el.a(
+                        rx.icon("folder-open", class_name="h-4 w-4"),
+                        "My Documents",
+                        href="/",
+                        class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer",
+                    ),
+                    class_name="hidden md:flex items-center gap-2",
+                ),
+                # Mobile hamburger (hidden on desktop)
+                mobile_menu_button(),
+                class_name="flex items-center gap-2",
             ),
-            rx.el.a(
-                rx.icon("folder-open", class_name="h-4 w-4"),
-                "My Documents",
-                href="/",
-                class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer",
-            ),
-            class_name="flex items-center gap-2",
+            class_name="h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between",
         ),
-        class_name="h-16 px-4 sm:px-6 lg:px-8 flex items-center justify-between border-b border-gray-200 bg-white shadow-sm",
+        # --- Mobile dropdown panel ---
+        mobile_menu_panel(),
+        class_name="relative border-b border-gray-200 bg-white shadow-sm",
     )

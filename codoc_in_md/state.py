@@ -402,9 +402,28 @@ class EditorState(rx.State):
     last_version: int = 0
     view_mode: str = "split"
 
+    # Sidebar visibility — defaults to True (open on wide screens).
+    sidebar_open: bool = True
+
+    # Mobile header menu
+    mobile_menu_open: bool = False
+
     # Split-view behavior.
     # When locked, the preview scroll follows the editor scroll (HackMD-like).
     is_scroll_locked: bool = True
+
+    def handle_viewport_width(self, width: list):
+        """Auto-close sidebar and switch view mode on narrow viewports."""
+        try:
+            w = int(width[0]) if isinstance(width, list) else int(width)
+        except (TypeError, ValueError, IndexError):
+            return
+        if w < 768:
+            self.sidebar_open = False
+            if self.view_mode == "split":
+                self.view_mode = "editor"
+        elif w < 1024:
+            self.sidebar_open = False
 
     # Monaco editor should be treated as uncontrolled for a stable cursor.
     # We keep an initial seed value that only changes when the document is (re)loaded
@@ -511,6 +530,12 @@ class EditorState(rx.State):
     @rx.event(background=True)
     async def on_load(self):
         """Initializes the session for the specific document ID."""
+        # Auto-close sidebar on narrow viewports.
+        yield rx.call_script(
+            "window.innerWidth",
+            callback=EditorState.handle_viewport_width,
+        )
+
         path = getattr(self.router.url, "path", "")
         doc_id = path.rstrip("/").split("/")[-1] if path else ""
 
@@ -530,7 +555,8 @@ class EditorState(rx.State):
         async with self:
             if not doc_id:
                 new_id = str(uuid.uuid4())[:8]
-                return rx.redirect(f"/doc/{new_id}")
+                yield rx.redirect(f"/doc/{new_id}")
+                return
             self.doc_id = doc_id
             if not self.my_user_id:
                 self._generate_user_info()

@@ -238,7 +238,15 @@ def index() -> rx.Component:
         rx.el.div(
             header(),
             rx.el.div(
-                sidebar(), content_area(), class_name="flex flex-1 overflow-hidden min-h-0"
+                rx.cond(
+                    EditorState.sidebar_open,
+                    rx.el.div(
+                        sidebar(),
+                        class_name="hidden md:flex",
+                    ),
+                ),
+                content_area(),
+                class_name="flex flex-1 overflow-hidden min-h-0",
             ),
             class_name="flex flex-col h-screen w-full bg-white",
         ),
