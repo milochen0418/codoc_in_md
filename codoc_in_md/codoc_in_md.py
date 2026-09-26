@@ -281,8 +281,14 @@ app = rx.App(
         ),
     ],
 )
+try:
+    from reflex_ddns_auth import AuthState as _AuthState
+    _auth_on_load = [_AuthState.load_auth]
+except ImportError:
+    _auth_on_load = []
+
 app.add_page(index, route="/doc/[document_id]", on_load=EditorState.on_load)
-app.add_page(doc_list_page, route="/", on_load=DocListState.load_documents)
+app.add_page(doc_list_page, route="/", on_load=[*_auth_on_load, DocListState.load_documents])
 
 # Backend embed endpoints (used by fenced-block renderers like ```sequence```).
 register_backend_embed_routes(app)

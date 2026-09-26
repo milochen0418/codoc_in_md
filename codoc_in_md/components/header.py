@@ -3,14 +3,23 @@ from codoc_in_md.state import EditorState
 
 
 def user_avatar(user: dict) -> rx.Component:
-    """Displays a user's avatar with a tooltip."""
+    """Displays a user's avatar with a tooltip. Uses Google avatar if available."""
+    avatar_img = rx.cond(
+        user["avatar_url"] != "",
+        rx.image(
+            src=user["avatar_url"],
+            class_name="h-8 w-8 rounded-full border-2 border-white object-cover",
+            alt=user["name"],
+        ),
+        rx.image(
+            src="https://api.dicebear.com/9.x/initials/svg?seed=" + user["name"],
+            class_name="h-8 w-8 rounded-full border-2 border-white",
+            alt=user["name"],
+        ),
+    )
     return rx.el.div(
         rx.el.div(
-            rx.image(
-                src=f"https://api.dicebear.com/9.x/initials/svg?seed={user['name']}",
-                class_name="h-8 w-8 rounded-full border-2 border-white",
-                alt=user["name"],
-            ),
+            avatar_img,
             rx.el.div(
                 user["name"],
                 class_name="absolute -bottom-8 left-1/2 -translate-x-1/2 px-2 py-1 bg-gray-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10",

@@ -4,6 +4,12 @@ import reflex as rx
 
 from codoc_in_md.state import DocListState, EditorState
 
+try:
+    from reflex_ddns_auth import AuthState
+    _HAS_AUTH = True
+except ImportError:
+    _HAS_AUTH = False
+
 
 def doc_row(doc: dict) -> rx.Component:
     """A single row in the document list."""
@@ -19,6 +25,23 @@ def doc_row(doc: dict) -> rx.Component:
         rx.el.td(
             doc["doc_id"],
             class_name="px-6 py-4 text-gray-500 text-sm font-mono",
+        ),
+        rx.el.td(
+            rx.cond(
+                doc["created_by_name"] != "",
+                rx.el.div(
+                    rx.el.span(
+                        doc["created_by_name"],
+                        class_name="text-gray-700 text-sm font-medium",
+                    ),
+                    rx.el.span(
+                        doc["created_by_email"],
+                        class_name="text-gray-400 text-xs block",
+                    ),
+                ),
+                rx.el.span("—", class_name="text-gray-300 text-sm"),
+            ),
+            class_name="px-6 py-4",
         ),
         rx.el.td(
             doc["formatted_time"],
@@ -53,6 +76,34 @@ def doc_list_page() -> rx.Component:
                         class_name="flex items-center gap-3",
                     ),
                     rx.el.div(
+                        *(
+                            [rx.cond(
+                                AuthState.is_logged_in,
+                                rx.el.div(
+                                    rx.cond(
+                                        AuthState.user_avatar != "",
+                                        rx.image(
+                                            src=AuthState.user_avatar,
+                                            class_name="h-8 w-8 rounded-full border-2 border-violet-200",
+                                        ),
+                                        rx.image(
+                                            src=rx.cond(
+                                                AuthState.user_name != "",
+                                                "https://api.dicebear.com/9.x/initials/svg?seed=" + AuthState.user_name,
+                                                "https://api.dicebear.com/9.x/initials/svg?seed=U",
+                                            ),
+                                            class_name="h-8 w-8 rounded-full border-2 border-violet-200",
+                                        ),
+                                    ),
+                                    rx.el.span(
+                                        AuthState.user_name,
+                                        class_name="text-sm font-medium text-gray-700",
+                                    ),
+                                    class_name="flex items-center gap-2 mr-3",
+                                ),
+                                rx.el.div(class_name="hidden"),
+                            )] if _HAS_AUTH else []
+                        ),
                         rx.el.button(
                             rx.icon("plus", class_name="mr-2 h-4 w-4"),
                             "New Document",
@@ -102,6 +153,10 @@ def doc_list_page() -> rx.Component:
                                         ),
                                         rx.el.th(
                                             "Doc ID",
+                                            class_name="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider",
+                                        ),
+                                        rx.el.th(
+                                            "Created By",
                                             class_name="px-6 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider",
                                         ),
                                         rx.el.th(

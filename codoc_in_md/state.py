@@ -235,6 +235,8 @@ class DocumentModel(rx.Model, table=True):
     content: str = ""
     updated_at: float = 0.0
     version: int = 1
+    created_by_email: str = ""
+    created_by_name: str = ""
 
 
 class Document(TypedDict):
@@ -243,6 +245,8 @@ class Document(TypedDict):
     content: str
     updated_at: float
     version: int
+    created_by_email: str
+    created_by_name: str
 
 
 class _DocumentStore:
@@ -261,6 +265,8 @@ class _DocumentStore:
             content=row.content,
             updated_at=row.updated_at,
             version=row.version,
+            created_by_email=row.created_by_email,
+            created_by_name=row.created_by_name,
         )
 
     def get(self, doc_id: str) -> Optional[Document]:
@@ -292,6 +298,8 @@ class _DocumentStore:
                     content=doc.get("content", ""),
                     updated_at=doc.get("updated_at", 0.0),
                     version=doc.get("version", 1),
+                    created_by_email=doc.get("created_by_email", ""),
+                    created_by_name=doc.get("created_by_name", ""),
                 )
                 session.add(row)
             else:
@@ -299,6 +307,9 @@ class _DocumentStore:
                 row.title = title
                 row.updated_at = doc.get("updated_at", 0.0)
                 row.version = doc.get("version", 1)
+                if doc.get("created_by_email") and not row.created_by_email:
+                    row.created_by_email = doc["created_by_email"]
+                    row.created_by_name = doc.get("created_by_name", "")
                 session.add(row)
             session.commit()
 
@@ -336,12 +347,14 @@ class User(TypedDict):
     name: str
     color: str
     last_seen: float
+    avatar_url: str
 
 
 class DisplayUser(TypedDict):
     id: str
     name: str
     color: str
+    avatar_url: str
 
 
 class DocListItem(TypedDict):
@@ -349,6 +362,8 @@ class DocListItem(TypedDict):
     title: str
     updated_at: float
     formatted_time: str
+    created_by_email: str
+    created_by_name: str
 
 
 FIXTURE_DOCS: dict[str, str] = {
@@ -396,6 +411,8 @@ class EditorState(rx.State):
     my_user_id: str = ""
     my_user_name: str = ""
     my_user_color: str = ""
+    my_user_email: str = ""
+    my_user_avatar: str = ""
     is_connected: bool = False
     is_syncing: bool = False
     is_loading: bool = True
@@ -435,28 +452,8 @@ class EditorState(rx.State):
     def editor_component_key(self) -> str:
         return f"{self.doc_id}:{self.editor_seed_version}"
 
-    def _generate_user_info(self):
-        """Generates a random identity for the session."""
-        adjectives = [
-            "Cosmic",
-            "Digital",
-            "Neon",
-            "Pixel",
-            "Quantum",
-            "Retro",
-            "Sonic",
-            "Techno",
-        ]
-        nouns = [
-            "Coder",
-            "Designer",
-            "Hacker",
-            "Maker",
-            "Ninja",
-            "Pilot",
-            "Wizard",
-            "Writer",
-        ]
+    async def _generate_user_info(self):
+        """Use SSO auth info if available, otherwise generate random identity."""
         colors = [
             "#FF5733",
             "#33FF57",
@@ -467,19 +464,42 @@ class EditorState(rx.State):
             "#F5FF33",
             "#FF8C33",
         ]
+
+        try:
+            from reflex_ddns_auth import AuthState
+            auth = await self.get_state(AuthState)
+            if not auth._auth_loaded:
+                await auth.load_auth()
+            if auth.is_logged_in:
+                self.my_user_id = auth.user_email or str(random.randint(10000, 99999))
+                self.my_user_name = auth.user_name or auth.user_email
+                self.my_user_email = auth.user_email
+                self.my_user_avatar = auth.user_avatar
+                self.my_user_color = colors[hash(auth.user_email) % len(colors)]
+                return
+        except ImportError:
+            pass
+
+        adjectives = [
+            "Cosmic", "Digital", "Neon", "Pixel",
+            "Quantum", "Retro", "Sonic", "Techno",
+        ]
+        nouns = [
+            "Coder", "Designer", "Hacker", "Maker",
+            "Ninja", "Pilot", "Wizard", "Writer",
+        ]
         self.my_user_id = str(random.randint(10000, 99999))
         self.my_user_name = f"{random.choice(adjectives)} {random.choice(nouns)}"
         self.my_user_color = random.choice(colors)
 
     @rx.event
-    def create_new_document(self):
+    async def create_new_document(self):
         """Creates a new empty document and redirects to it."""
+        if not self.my_user_id:
+            await self._generate_user_info()
         new_id = str(uuid.uuid4())[:8]
         default_content = "# Start typing your masterpiece..."
-        # Stop any running background sync loop for the old doc.
         self.is_syncing = False
-        # Prepare fresh state so the editor shows clean content immediately,
-        # even if on_load doesn't re-fire (same route pattern SPA navigation).
         self.doc_id = new_id
         self.doc_content = default_content
         self.doc_content_rendered = _render_markdown_source(default_content)
@@ -490,10 +510,11 @@ class EditorState(rx.State):
         return rx.redirect(f"/doc/{new_id}")
 
     @rx.event
-    def duplicate_document(self):
+    async def duplicate_document(self):
         """Duplicates the current document into a new one and redirects to it."""
+        if not self.my_user_id:
+            await self._generate_user_info()
         new_id = str(uuid.uuid4())[:8]
-        # Stop any running background sync loop for the old doc.
         self.is_syncing = False
         self._save_doc_to_db(new_id, self.doc_content)
         self.doc_id = new_id
@@ -515,6 +536,8 @@ class EditorState(rx.State):
                 "content": content,
                 "updated_at": now,
                 "version": 1,
+                "created_by_email": self.my_user_email,
+                "created_by_name": self.my_user_name,
             }
             DOCUMENTS_STORE[doc_id] = doc
             self.last_version = 1
@@ -559,7 +582,7 @@ class EditorState(rx.State):
                 return
             self.doc_id = doc_id
             if not self.my_user_id:
-                self._generate_user_info()
+                await self._generate_user_info()
             self.is_loading = True
 
         # For fixtures, prefer the asset file even if the doc exists in memory.
@@ -608,6 +631,7 @@ class EditorState(rx.State):
                     "name": self.my_user_name,
                     "color": self.my_user_color,
                     "last_seen": time.time(),
+                    "avatar_url": self.my_user_avatar,
                 }
 
             # Keep ephemeral presence tracking server-side.
@@ -616,7 +640,7 @@ class EditorState(rx.State):
             current_users.sort(key=lambda u: u["name"])
 
             display_users: list[DisplayUser] = [
-                {"id": u["id"], "name": u["name"], "color": u["color"]}
+                {"id": u["id"], "name": u["name"], "color": u["color"], "avatar_url": u.get("avatar_url", "")}
                 for u in current_users
             ]
 
@@ -687,6 +711,8 @@ class DocListState(rx.State):
                     datetime.datetime.fromtimestamp(d["updated_at"]).strftime("%Y-%m-%d %H:%M")
                     if d["updated_at"] > 0 else ""
                 ),
+                created_by_email=d.get("created_by_email", ""),
+                created_by_name=d.get("created_by_name", ""),
             )
             for d in docs
         ]
