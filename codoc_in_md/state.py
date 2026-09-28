@@ -364,6 +364,16 @@ class DocListItem(TypedDict):
     formatted_time: str
     created_by_email: str
     created_by_name: str
+    words: int
+    is_empty: bool
+    snippet: str
+
+
+class CreatorOption(TypedDict):
+    key: str
+    label: str
+    sublabel: str
+    count: int
 
 
 FIXTURE_DOCS: dict[str, str] = {
@@ -694,36 +704,220 @@ class EditorState(rx.State):
 class DocListState(rx.State):
     """State for the document management page."""
 
+    # Filtered + sorted view shown in the table.
     documents: list[DocListItem] = []
+    total_count: int = 0
+    creator_options: list[CreatorOption] = []
+    empty_count: int = 0
+    my_email: str = ""
+
+    # Filters
+    search: str = ""
+    creator_filter: str = "all"  # all | mine | guest | acct:<email>
+    time_filter: str = "any"  # any | today | 7d | 30d | older
+    sort_by: str = "updated_desc"  # updated_desc | updated_asc | title_asc | title_desc
+    only_empty: bool = False
+
+    _all_docs: list[DocListItem] = []
+    _contents: dict[str, str] = {}
+
+    @rx.var
+    def has_active_filters(self) -> bool:
+        return bool(
+            self.search.strip()
+            or self.creator_filter != "all"
+            or self.time_filter != "any"
+            or self.only_empty
+        )
+
+    @staticmethod
+    def _creator_key(doc: DocListItem) -> str:
+        email = doc["created_by_email"]
+        return f"acct:{email}" if email else "guest"
 
     @rx.event
-    def load_documents(self):
-        """Load all documents, sorted by updated_at descending."""
+    async def load_documents(self):
+        """Load all documents from the store, then apply the current filters."""
         import datetime
-        docs = DOCUMENTS_STORE.values()
-        self.documents = [
-            DocListItem(
-                doc_id=d["doc_id"],
-                title=d.get("title") or _extract_title(d["content"]),
-                updated_at=d["updated_at"],
-                formatted_time=(
-                    datetime.datetime.fromtimestamp(d["updated_at"]).strftime("%Y-%m-%d %H:%M")
-                    if d["updated_at"] > 0 else ""
-                ),
-                created_by_email=d.get("created_by_email", ""),
-                created_by_name=d.get("created_by_name", ""),
+
+        self.my_email = ""
+        try:
+            from reflex_ddns_auth import AuthState
+            auth = await self.get_state(AuthState)
+            if auth.is_logged_in:
+                self.my_email = auth.user_email or ""
+        except ImportError:
+            pass
+
+        all_docs: list[DocListItem] = []
+        contents: dict[str, str] = {}
+        for d in DOCUMENTS_STORE.values():
+            content = d.get("content", "") or ""
+            stripped = content.strip()
+            all_docs.append(
+                DocListItem(
+                    doc_id=d["doc_id"],
+                    title=d.get("title") or _extract_title(content),
+                    updated_at=d["updated_at"],
+                    formatted_time=(
+                        datetime.datetime.fromtimestamp(d["updated_at"]).strftime("%Y-%m-%d %H:%M")
+                        if d["updated_at"] > 0 else ""
+                    ),
+                    created_by_email=d.get("created_by_email", ""),
+                    created_by_name=d.get("created_by_name", ""),
+                    words=len(stripped.split()),
+                    is_empty=stripped in ("", "# Start typing your masterpiece..."),
+                    snippet="",
+                )
             )
-            for d in docs
-        ]
+            contents[d["doc_id"]] = content
+        self._all_docs = all_docs
+        self._contents = contents
+        self.total_count = len(all_docs)
+        self.empty_count = sum(1 for d in all_docs if d["is_empty"])
+
+        # Creator facets: accounts by email, everyone without an email is a guest.
+        counts: dict[str, int] = {}
+        names: dict[str, str] = {}
+        for d in all_docs:
+            key = self._creator_key(d)
+            counts[key] = counts.get(key, 0) + 1
+            if key != "guest" and d["created_by_name"]:
+                names.setdefault(key, d["created_by_name"])
+        options = [CreatorOption(key="all", label="All", sublabel="", count=len(all_docs))]
+        if self.my_email:
+            options.append(CreatorOption(
+                key="mine", label="Mine", sublabel=self.my_email,
+                count=counts.get(f"acct:{self.my_email}", 0),
+            ))
+        if "guest" in counts:
+            options.append(CreatorOption(key="guest", label="Guest", sublabel="Not signed in", count=counts["guest"]))
+        accounts = sorted(
+            (k for k in counts if k != "guest"),
+            key=lambda k: (-counts[k], names.get(k, k).lower()),
+        )
+        for key in accounts:
+            email = key.removeprefix("acct:")
+            options.append(CreatorOption(key=key, label=names.get(key) or email, sublabel=email, count=counts[key]))
+        self.creator_options = options
+
+        valid_keys = {o["key"] for o in options}
+        if self.creator_filter not in valid_keys:
+            self.creator_filter = "all"
+        self._apply_filters()
+
+    def _apply_filters(self):
+        now = time.time()
+        day = 86400
+        start_of_today = time.mktime(time.localtime(now)[:3] + (0, 0, 0, 0, 0, -1))
+        query = self.search.strip().lower()
+
+        result: list[DocListItem] = []
+        for d in self._all_docs:
+            key = self._creator_key(d)
+            if self.creator_filter == "mine":
+                if key != f"acct:{self.my_email}":
+                    continue
+            elif self.creator_filter != "all" and key != self.creator_filter:
+                continue
+
+            ts = d["updated_at"]
+            if self.time_filter == "today" and ts < start_of_today:
+                continue
+            if self.time_filter == "7d" and ts < now - 7 * day:
+                continue
+            if self.time_filter == "30d" and ts < now - 30 * day:
+                continue
+            if self.time_filter == "older" and ts >= now - 30 * day:
+                continue
+
+            if self.only_empty and not d["is_empty"]:
+                continue
+
+            snippet = ""
+            if query:
+                meta = " ".join(
+                    (d["title"], d["doc_id"], d["created_by_name"], d["created_by_email"])
+                ).lower()
+                if query not in meta:
+                    content = self._contents.get(d["doc_id"], "")
+                    pos = content.lower().find(query)
+                    if pos < 0:
+                        continue
+                    start = max(0, pos - 40)
+                    end = min(len(content), pos + len(query) + 60)
+                    snippet = (
+                        ("…" if start > 0 else "")
+                        + " ".join(content[start:end].split())
+                        + ("…" if end < len(content) else "")
+                    )
+            result.append({**d, "snippet": snippet})
+
+        if self.sort_by == "updated_asc":
+            result.sort(key=lambda d: d["updated_at"])
+        elif self.sort_by == "title_asc":
+            result.sort(key=lambda d: d["title"].lower())
+        elif self.sort_by == "title_desc":
+            result.sort(key=lambda d: d["title"].lower(), reverse=True)
+        else:
+            result.sort(key=lambda d: d["updated_at"], reverse=True)
+        self.documents = result
 
     @rx.event
-    def delete_document(self, doc_id: str):
+    def set_search(self, value: str):
+        self.search = value
+        self._apply_filters()
+
+    @rx.event
+    def set_creator_filter(self, value: str):
+        self.creator_filter = value
+        self._apply_filters()
+
+    @rx.event
+    def set_time_filter(self, value: str):
+        self.time_filter = value
+        self._apply_filters()
+
+    @rx.event
+    def set_sort_by(self, value: str):
+        self.sort_by = value
+        self._apply_filters()
+
+    @rx.event
+    def toggle_only_empty(self):
+        self.only_empty = not self.only_empty
+        self._apply_filters()
+
+    @rx.event
+    def filter_by_creator_of(self, email: str):
+        """Row shortcut: show every document from the same creator."""
+        self.creator_filter = f"acct:{email}" if email else "guest"
+        self._apply_filters()
+
+    @rx.event
+    def reset_filters(self):
+        self.search = ""
+        self.creator_filter = "all"
+        self.time_filter = "any"
+        self.only_empty = False
+        self._apply_filters()
+
+    @rx.event
+    async def delete_document(self, doc_id: str):
         """Delete a single document and refresh the list."""
         del DOCUMENTS_STORE[doc_id]
-        self.load_documents()
+        await self.load_documents()
 
     @rx.event
-    def clear_all_documents(self):
+    async def delete_filtered_documents(self):
+        """Delete every document in the current filtered view."""
+        for d in self.documents:
+            if d["doc_id"] in DOCUMENTS_STORE:
+                del DOCUMENTS_STORE[d["doc_id"]]
+        await self.load_documents()
+
+    @rx.event
+    async def clear_all_documents(self):
         """Delete ALL documents."""
         DOCUMENTS_STORE.clear()
-        self.documents = []
+        await self.load_documents()
