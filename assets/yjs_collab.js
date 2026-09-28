@@ -434,10 +434,13 @@
       return;
     }
 
+    // Monaco remounts (view-mode switch, Reflex re-seeding the editor) create a
+    // new model while the old binding lingers on the disposed one.
     const editor = getEditor();
-    if (editor && !binding) {
+    const model = editor ? editor.getModel() : null;
+    if (model && (!binding || binding.monacoModel !== model)) {
       tryRebind();
-    } else if (!editor && binding) {
+    } else if (!model && binding) {
       destroyBinding();
     }
   };

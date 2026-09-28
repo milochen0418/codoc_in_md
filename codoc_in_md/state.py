@@ -482,16 +482,20 @@ class EditorState(rx.State):
         except ImportError:
             pass
 
+        # Keep a stable guest id/color across page loads; only rotate when
+        # coming from a logged-in identity (or on first visit).
+        if self.is_authenticated or not self.my_user_id:
+            self.my_user_id = str(random.randint(10000, 99999))
+            self.my_user_color = random.choice(colors)
         self.is_authenticated = False
-        self.my_user_id = str(random.randint(10000, 99999))
         self.my_user_name = "Guest"
-        self.my_user_color = random.choice(colors)
+        self.my_user_email = ""
+        self.my_user_avatar = ""
 
     @rx.event
     async def create_new_document(self):
         """Creates a new empty document and redirects to it."""
-        if not self.my_user_id:
-            await self._generate_user_info()
+        await self._generate_user_info()
         new_id = str(uuid.uuid4())[:8]
         default_content = "# Start typing your masterpiece..."
         self.is_syncing = False
@@ -507,8 +511,7 @@ class EditorState(rx.State):
     @rx.event
     async def duplicate_document(self):
         """Duplicates the current document into a new one and redirects to it."""
-        if not self.my_user_id:
-            await self._generate_user_info()
+        await self._generate_user_info()
         new_id = str(uuid.uuid4())[:8]
         self.is_syncing = False
         self._save_doc_to_db(new_id, self.doc_content)
@@ -578,8 +581,7 @@ class EditorState(rx.State):
                 yield rx.redirect(f"/doc/{new_id}")
                 return
             self.doc_id = doc_id
-            if not self.my_user_id:
-                await self._generate_user_info()
+            await self._generate_user_info()
             self.is_loading = True
 
         # For fixtures, prefer the asset file even if the doc exists in memory.
