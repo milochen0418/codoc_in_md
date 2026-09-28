@@ -11,6 +11,7 @@ from codoc_in_md.components.doc_list import doc_list_page
 from codoc_in_md import embeds
 from codoc_in_md.embeds import register_backend_embed_routes
 from codoc_in_md.export_pdf import register_pdf_export_routes
+from codoc_in_md.link_preview import register_link_preview_routes
 from codoc_in_md.yjs_ws import register_yjs_routes
 
 
@@ -296,5 +297,7 @@ app.add_page(auth_debug_page, route="/auth-debug", on_load=[*_auth_on_load, Auth
 register_backend_embed_routes(app)
 # PDF export endpoint (HackMD/CodiMD-like server-side export).
 register_pdf_export_routes(app)
+# Open Graph link-preview endpoints (chat apps unfurling shared doc URLs).
+register_link_preview_routes(app)
 # Yjs CRDT WebSocket relay for real-time collaboration.
 register_yjs_routes(app)

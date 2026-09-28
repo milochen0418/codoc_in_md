@@ -6,6 +6,9 @@
 /__embed
 /__export
 
+# Open Graph link previews (per-document title/description/thumbnail).
+/__og/
+
 # Yjs CRDT WebSocket relay (collaborative editing).
 # Trailing slash prevents matching static assets like /yjs_collab.js.
 /yjs/
