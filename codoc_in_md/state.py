@@ -701,6 +701,9 @@ class EditorState(rx.State):
         return len(self.users)
 
 
+SEARCH_INPUT_ID = "doc-list-search"
+
+
 class DocListState(rx.State):
     """State for the document management page."""
 
@@ -895,12 +898,20 @@ class DocListState(rx.State):
         self._apply_filters()
 
     @rx.event
+    def clear_search(self):
+        self.search = ""
+        self._apply_filters()
+        # The search box is uncontrolled, so clear its DOM value explicitly.
+        return rx.set_value(SEARCH_INPUT_ID, "")
+
+    @rx.event
     def reset_filters(self):
         self.search = ""
         self.creator_filter = "all"
         self.time_filter = "any"
         self.only_empty = False
         self._apply_filters()
+        return rx.set_value(SEARCH_INPUT_ID, "")
 
     @rx.event
     async def delete_document(self, doc_id: str):

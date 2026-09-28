@@ -2,7 +2,7 @@
 
 import reflex as rx
 
-from codoc_in_md.state import DocListState, EditorState
+from codoc_in_md.state import SEARCH_INPUT_ID, DocListState, EditorState
 
 try:
     from reflex_ddns_auth import AuthState
@@ -132,8 +132,11 @@ def filter_bar() -> rx.Component:
         rx.el.div(
             rx.el.div(
                 rx.icon("search", class_name="h-4 w-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"),
+                # Uncontrolled on purpose: binding `value` to backend state makes every
+                # keystroke wait for a round-trip (and debounced events drop characters).
                 rx.el.input(
-                    value=DocListState.search,
+                    id=SEARCH_INPUT_ID,
+                    default_value=DocListState.search,
                     on_change=DocListState.set_search.debounce(250),
                     placeholder="Search title, content, doc ID or creator…",
                     class_name=(
@@ -145,7 +148,7 @@ def filter_bar() -> rx.Component:
                     DocListState.search != "",
                     rx.el.button(
                         rx.icon("x", class_name="h-4 w-4"),
-                        on_click=DocListState.set_search(""),
+                        on_click=DocListState.clear_search,
                         title="Clear search",
                         class_name="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 cursor-pointer",
                     ),
