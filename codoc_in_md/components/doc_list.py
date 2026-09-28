@@ -28,7 +28,7 @@ def doc_row(doc: dict) -> rx.Component:
         ),
         rx.el.td(
             rx.cond(
-                doc["created_by_name"] != "",
+                doc["created_by_email"] != "",
                 rx.el.div(
                     rx.el.span(
                         doc["created_by_name"],
@@ -39,7 +39,11 @@ def doc_row(doc: dict) -> rx.Component:
                         class_name="text-gray-400 text-xs block",
                     ),
                 ),
-                rx.el.span("—", class_name="text-gray-300 text-sm"),
+                rx.el.div(
+                    rx.icon("user", class_name="h-3.5 w-3.5 text-gray-400 inline-block mr-1"),
+                    rx.el.span("Guest", class_name="text-gray-400 text-sm italic"),
+                    class_name="flex items-center gap-1",
+                ),
             ),
             class_name="px-6 py-4",
         ),
@@ -99,9 +103,29 @@ def doc_list_page() -> rx.Component:
                                         AuthState.user_name,
                                         class_name="text-sm font-medium text-gray-700",
                                     ),
+                                    rx.el.a(
+                                        "Logout",
+                                        href=AuthState.logout_url,
+                                        class_name=(
+                                            "ml-1 px-2 py-1 text-xs font-medium text-gray-500 "
+                                            "hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                                        ),
+                                    ),
                                     class_name="flex items-center gap-2 mr-3",
                                 ),
-                                rx.el.div(class_name="hidden"),
+                                rx.el.div(
+                                    rx.icon("user", class_name="h-5 w-5 text-gray-400"),
+                                    rx.el.span("Guest", class_name="text-sm font-medium text-gray-500"),
+                                    rx.el.a(
+                                        "Login",
+                                        href=AuthState.login_url,
+                                        class_name=(
+                                            "ml-2 px-3 py-1 text-xs font-medium text-white bg-violet-600 "
+                                            "rounded-md hover:bg-violet-700 transition-colors"
+                                        ),
+                                    ),
+                                    class_name="flex items-center gap-2 mr-3",
+                                ),
                             )] if _HAS_AUTH else []
                         ),
                         rx.el.button(

@@ -88,17 +88,35 @@ def sidebar() -> rx.Component:
                 class_name="flex justify-between items-center px-4 py-2",
             ),
             rx.el.div(
-                rx.el.p("My Session", class_name="text-sm font-medium text-gray-700"),
-                rx.el.div(
+                rx.el.p("Account", class_name="text-sm font-medium text-gray-700"),
+                rx.cond(
+                    EditorState.is_authenticated,
                     rx.el.div(
-                        class_name="w-2 h-2 rounded-full mr-2",
-                        style={"background-color": EditorState.my_user_color},
+                        rx.cond(
+                            EditorState.my_user_avatar != "",
+                            rx.image(
+                                src=EditorState.my_user_avatar,
+                                class_name="w-5 h-5 rounded-full mr-1.5",
+                            ),
+                            rx.el.div(
+                                class_name="w-2 h-2 rounded-full mr-2",
+                                style={"background-color": EditorState.my_user_color},
+                            ),
+                        ),
+                        rx.el.span(
+                            EditorState.my_user_name,
+                            class_name="text-xs text-gray-700 truncate max-w-[100px] font-medium",
+                        ),
+                        class_name="flex items-center",
                     ),
-                    rx.el.span(
-                        EditorState.my_user_name,
-                        class_name="text-xs text-gray-500 truncate max-w-[100px]",
+                    rx.el.div(
+                        rx.icon("user", class_name="h-3.5 w-3.5 text-gray-400 mr-1.5"),
+                        rx.el.span(
+                            "Guest",
+                            class_name="text-xs text-gray-400 italic",
+                        ),
+                        class_name="flex items-center",
                     ),
-                    class_name="flex items-center",
                 ),
                 class_name="flex justify-between items-center px-4 py-2 border-t border-gray-100",
             ),

@@ -1,6 +1,12 @@
 import reflex as rx
 from codoc_in_md.state import EditorState
 
+try:
+    from reflex_ddns_auth import AuthState
+    _HAS_AUTH = True
+except ImportError:
+    _HAS_AUTH = False
+
 
 def user_avatar(user: dict) -> rx.Component:
     """Displays a user's avatar with a tooltip. Uses Google avatar if available."""
@@ -194,6 +200,57 @@ def _mobile_menu_item_cls() -> str:
     )
 
 
+def user_identity() -> rx.Component:
+    """Shows auth status: logged-in user info + logout, or Guest + login."""
+    guest_view = rx.el.div(
+        rx.icon("user", class_name="h-5 w-5 text-gray-400"),
+        rx.el.span("Guest", class_name="text-sm font-medium text-gray-500"),
+        *(
+            [rx.el.a(
+                "Login",
+                href=AuthState.login_url,
+                class_name=(
+                    "ml-2 px-3 py-1 text-xs font-medium text-white bg-violet-600 "
+                    "rounded-md hover:bg-violet-700 transition-colors"
+                ),
+            )] if _HAS_AUTH else []
+        ),
+        class_name="flex items-center gap-2",
+    )
+
+    if not _HAS_AUTH:
+        return guest_view
+
+    logged_in_view = rx.el.div(
+        rx.cond(
+            AuthState.user_avatar != "",
+            rx.image(
+                src=AuthState.user_avatar,
+                class_name="h-7 w-7 rounded-full border-2 border-violet-200",
+            ),
+            rx.image(
+                src="https://api.dicebear.com/9.x/initials/svg?seed=" + AuthState.user_name,
+                class_name="h-7 w-7 rounded-full border-2 border-violet-200",
+            ),
+        ),
+        rx.el.span(
+            AuthState.user_name,
+            class_name="text-sm font-medium text-gray-700 max-w-[120px] truncate",
+        ),
+        rx.el.a(
+            "Logout",
+            href=AuthState.logout_url,
+            class_name=(
+                "ml-1 px-2 py-1 text-xs font-medium text-gray-500 "
+                "hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+            ),
+        ),
+        class_name="flex items-center gap-2",
+    )
+
+    return rx.cond(AuthState.is_logged_in, logged_in_view, guest_view)
+
+
 def mobile_menu_button() -> rx.Component:
     """Hamburger button shown only on mobile."""
     return rx.el.button(
@@ -205,6 +262,60 @@ def mobile_menu_button() -> rx.Component:
         on_click=EditorState.set_mobile_menu_open(~EditorState.mobile_menu_open),
         class_name="p-2 rounded-md text-gray-500 hover:bg-gray-100 transition-colors md:hidden",
     )
+
+
+def _mobile_account_section() -> rx.Component:
+    """Account info for the mobile menu."""
+    guest_view = rx.el.div(
+        rx.el.div(
+            rx.icon("user", class_name="h-5 w-5 text-gray-400"),
+            rx.el.span("Guest", class_name="text-sm font-medium text-gray-500"),
+            class_name="flex items-center gap-3 px-4 py-3",
+        ),
+        *(
+            [rx.el.a(
+                rx.icon("log-in", class_name="h-4 w-4"),
+                "Login with Google",
+                href=AuthState.login_url,
+                class_name=_mobile_menu_item_cls(),
+            )] if _HAS_AUTH else []
+        ),
+    )
+
+    if not _HAS_AUTH:
+        return guest_view
+
+    logged_in_view = rx.el.div(
+        rx.el.div(
+            rx.cond(
+                AuthState.user_avatar != "",
+                rx.image(
+                    src=AuthState.user_avatar,
+                    class_name="h-8 w-8 rounded-full border-2 border-violet-200",
+                ),
+                rx.icon("user", class_name="h-5 w-5 text-gray-400"),
+            ),
+            rx.el.div(
+                rx.el.span(
+                    AuthState.user_name,
+                    class_name="text-sm font-medium text-gray-700 block",
+                ),
+                rx.el.span(
+                    AuthState.user_email,
+                    class_name="text-xs text-gray-400 block",
+                ),
+            ),
+            class_name="flex items-center gap-3 px-4 py-3",
+        ),
+        rx.el.a(
+            rx.icon("log-out", class_name="h-4 w-4"),
+            "Logout",
+            href=AuthState.logout_url,
+            class_name=_mobile_menu_item_cls(),
+        ),
+    )
+
+    return rx.cond(AuthState.is_logged_in, logged_in_view, guest_view)
 
 
 def mobile_menu_panel() -> rx.Component:
@@ -290,6 +401,12 @@ def mobile_menu_panel() -> rx.Component:
                     href="/",
                     class_name=_mobile_menu_item_cls(),
                 ),
+                class_name="border-b border-gray-100",
+            ),
+            # Account section
+            rx.el.div(
+                rx.el.p("Account", class_name="text-xs font-semibold text-gray-400 uppercase tracking-wider px-4 py-2"),
+                _mobile_account_section(),
             ),
             class_name="absolute top-full left-0 right-0 bg-white border-b border-gray-200 shadow-lg z-50 md:hidden",
         ),
@@ -356,6 +473,8 @@ def header() -> rx.Component:
                         href="/",
                         class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer",
                     ),
+                    rx.el.div(class_name="w-px h-6 bg-gray-200"),
+                    user_identity(),
                     class_name="hidden md:flex items-center gap-2",
                 ),
                 # Mobile hamburger (hidden on desktop)

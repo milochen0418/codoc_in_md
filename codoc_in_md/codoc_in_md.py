@@ -287,8 +287,10 @@ try:
 except ImportError:
     _auth_on_load = []
 
-app.add_page(index, route="/doc/[document_id]", on_load=EditorState.on_load)
+from codoc_in_md.components.auth_debug import auth_debug_page, AuthDebugState
+app.add_page(index, route="/doc/[document_id]", on_load=[*_auth_on_load, EditorState.on_load])
 app.add_page(doc_list_page, route="/", on_load=[*_auth_on_load, DocListState.load_documents])
+app.add_page(auth_debug_page, route="/auth-debug", on_load=[*_auth_on_load, AuthDebugState.load_debug])
 
 # Backend embed endpoints (used by fenced-block renderers like ```sequence```).
 register_backend_embed_routes(app)

@@ -413,6 +413,7 @@ class EditorState(rx.State):
     my_user_color: str = ""
     my_user_email: str = ""
     my_user_avatar: str = ""
+    is_authenticated: bool = False
     is_connected: bool = False
     is_syncing: bool = False
     is_loading: bool = True
@@ -476,20 +477,14 @@ class EditorState(rx.State):
                 self.my_user_email = auth.user_email
                 self.my_user_avatar = auth.user_avatar
                 self.my_user_color = colors[hash(auth.user_email) % len(colors)]
+                self.is_authenticated = True
                 return
         except ImportError:
             pass
 
-        adjectives = [
-            "Cosmic", "Digital", "Neon", "Pixel",
-            "Quantum", "Retro", "Sonic", "Techno",
-        ]
-        nouns = [
-            "Coder", "Designer", "Hacker", "Maker",
-            "Ninja", "Pilot", "Wizard", "Writer",
-        ]
+        self.is_authenticated = False
         self.my_user_id = str(random.randint(10000, 99999))
-        self.my_user_name = f"{random.choice(adjectives)} {random.choice(nouns)}"
+        self.my_user_name = "Guest"
         self.my_user_color = random.choice(colors)
 
     @rx.event
@@ -529,6 +524,8 @@ class EditorState(rx.State):
     def _save_doc_to_db(self, doc_id: str, content: str):
         """Helper to save document to the store."""
         now = time.time()
+        creator_email = self.my_user_email if self.is_authenticated else ""
+        creator_name = self.my_user_name if self.is_authenticated else "Guest"
         if doc_id not in DOCUMENTS_STORE:
             doc: Document = {
                 "doc_id": doc_id,
@@ -536,8 +533,8 @@ class EditorState(rx.State):
                 "content": content,
                 "updated_at": now,
                 "version": 1,
-                "created_by_email": self.my_user_email,
-                "created_by_name": self.my_user_name,
+                "created_by_email": creator_email,
+                "created_by_name": creator_name,
             }
             DOCUMENTS_STORE[doc_id] = doc
             self.last_version = 1

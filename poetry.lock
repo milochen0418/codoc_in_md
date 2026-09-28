@@ -1334,6 +1334,21 @@ files = [
 windows-terminal = ["colorama (>=0.4.6)"]
 
 [[package]]
+name = "pyjwt"
+version = "2.15.0"
+description = "JSON Web Token implementation in Python"
+optional = false
+python-versions = ">=3.9"
+groups = ["main"]
+files = [
+    {file = "pyjwt-2.15.0-py3-none-any.whl", hash = "sha256:7a3742debf6b879e912dbb9819ceec1594be812452b78c5f2e2dfc56564954f8"},
+    {file = "pyjwt-2.15.0.tar.gz", hash = "sha256:b11c5f9791d7bf51c2b39a81ed669f6b2dbbd669df2942f6c60167e9e3d1abe4"},
+]
+
+[package.extras]
+crypto = ["cryptography (>=3.4.0)"]
+
+[[package]]
 name = "pyphen"
 version = "0.17.2"
 description = "Pure Python module to hyphenate text"
@@ -1480,6 +1495,24 @@ wrapt = ">=1.17.0,<3.0"
 [package.extras]
 db = ["alembic (>=1.15.2,<2.0)", "pydantic (>=1.10.21,<3.0)", "sqlmodel (>=0.0.24,<0.1)"]
 monitoring = ["pyleak (>=0.1.14,<1.0)"]
+
+[[package]]
+name = "reflex-ddns-auth"
+version = "0.1.0"
+description = "Shared SSO AuthState for Reflex apps on *.reflex-ddns.com"
+optional = false
+python-versions = ">=3.11,<3.12"
+groups = ["main"]
+files = []
+develop = true
+
+[package.dependencies]
+PyJWT = ">=2.8"
+reflex = ">=0.6"
+
+[package.source]
+type = "directory"
+url = "../reflex_ddns_auth"
 
 [[package]]
 name = "reflex-hosting-cli"
@@ -2063,4 +2096,4 @@ test = ["pytest"]
 [metadata]
 lock-version = "2.1"
 python-versions = "~3.11"
-content-hash = "2cf233fbfaeeb1f3dbeec87ef990ec15969eaea986497884b92fff9704c0fd02"
+content-hash = "6265aad5d7df5cbe1ef6437421364fa3476b398198c1cdb8727ab53a83c4703e"
