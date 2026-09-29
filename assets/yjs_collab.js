@@ -290,6 +290,19 @@
     return `${wsProt}//${hostname}${backendPort ? ":" + backendPort : ""}/yjs`;
   };
 
+  /**
+   * True when the Monaco editor on the page holds the loaded content of
+   * `docId` (see data_codoc_* attrs on editor_panel in codoc_in_md.py).
+   * Guards against binding/seeding with the previous document's content
+   * while Reflex is still loading the new one.
+   */
+  const editorReadyFor = (docId) => {
+    const el = document.querySelector("[data-codoc-doc-id], [data_codoc_doc_id]");
+    if (!el) return false;
+    const attr = (name) => el.getAttribute("data-" + name) ?? el.getAttribute("data_" + name.replace(/-/g, "_"));
+    return attr("codoc-doc-id") === docId && attr("codoc-loading") === "false";
+  };
+
   /** Return the first Monaco ICodeEditor instance, or null. */
   const getEditor = () => {
     try {
@@ -321,6 +334,9 @@
       try { ydoc.destroy(); } catch { /* ignore */ }
       ydoc = null;
     }
+    // Never leave the previous document's Y.Text reachable: tryRebind() would
+    // otherwise bind it to the next document's editor while setup() is pending.
+    window._codocYjs = null;
     currentDocId = null;
   };
 
@@ -379,7 +395,7 @@
       // rather than a stale model that hasn't re-rendered yet.
 
       // Store for rebinding after Monaco remounts.
-      window._codocYjs = { ytext, provider, ydoc };
+      window._codocYjs = { docId, ytext, provider, ydoc };
       setupErrors = 0; // success resets error counter
     } catch (err) {
       setupErrors++;
@@ -391,7 +407,9 @@
 
   /** Re-create the MonacoBinding after Monaco remounts (e.g. view-mode switch). */
   const tryRebind = () => {
-    if (!window._codocYjs || !currentDocId || !Y) return;
+    if (setupBusy || !window._codocYjs || !currentDocId || !Y) return;
+    if (window._codocYjs.docId !== currentDocId) return;
+    if (!editorReadyFor(currentDocId)) return;
     const editor = getEditor();
     if (!editor) return;
 
@@ -426,7 +444,11 @@
 
   const poll = () => {
     const docId = getDocId();
-    if (!docId) return;
+    if (!docId) {
+      // Left the editor page (e.g. back to My Documents): disconnect.
+      if (currentDocId && !setupBusy) destroyAll();
+      return;
+    }
 
     // Document changed → full re-setup.
     if (docId !== currentDocId) {
@@ -439,6 +461,7 @@
     const editor = getEditor();
     const model = editor ? editor.getModel() : null;
     if (model && (!binding || binding.monacoModel !== model)) {
+      if (binding) destroyBinding();
       tryRebind();
     } else if (!model && binding) {
       destroyBinding();

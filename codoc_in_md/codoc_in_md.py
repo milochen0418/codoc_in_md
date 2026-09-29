@@ -37,6 +37,10 @@ def editor_panel() -> rx.Component:
             height="100%",
             width="100%",
         ),
+        # Read by assets/yjs_collab.js: only bind Yjs once the editor holds the
+        # loaded content of the document in the URL.
+        data_codoc_doc_id=EditorState.doc_id,
+        data_codoc_loading=EditorState.is_loading,
         class_name="h-full w-full",
     )
 

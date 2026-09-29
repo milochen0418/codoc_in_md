@@ -590,9 +590,16 @@ class EditorState(rx.State):
                 new_id = str(uuid.uuid4())[:8]
                 yield rx.redirect(f"/doc/{new_id}")
                 return
-            self.doc_id = doc_id
-            await self._generate_user_info()
+            # Drop the previous document's content before switching doc_id so the
+            # editor (keyed by doc_id) never remounts under the new doc with stale
+            # content, which Yjs would otherwise seed/sync into the new document.
             self.is_loading = True
+            self.doc_id = doc_id
+            self.doc_content = ""
+            self.doc_content_rendered = ""
+            self.editor_seed_content = ""
+            self.editor_seed_version += 1
+            await self._generate_user_info()
 
         # For fixtures, prefer the asset file even if the doc exists in memory.
         if fixture_content is not None:
@@ -670,6 +677,10 @@ class EditorState(rx.State):
     def update_content(self, new_content: str):
         """Updates the document content locally and persists to in-memory store."""
 
+        # Ignore editor changes while a document is (re)loading: they belong to
+        # the previous document's editor instance, not to self.doc_id.
+        if self.is_loading:
+            return
         self.doc_content = new_content
         self.doc_content_rendered = _render_markdown_source(new_content)
         self._save_doc_to_db(self.doc_id, new_content)
