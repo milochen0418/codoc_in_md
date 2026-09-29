@@ -2,7 +2,11 @@
 
 import reflex as rx
 
+from codoc_in_md.components.header import _HAS_INTENT, my_relack_username, open_profile
 from codoc_in_md.state import SEARCH_INPUT_ID, DocListState, EditorState
+
+if _HAS_INTENT:
+    from reflex_ddns_auth.intent import intent_host
 
 try:
     from reflex_ddns_auth import AuthState
@@ -357,20 +361,25 @@ def doc_list_page() -> rx.Component:
                             [rx.cond(
                                 AuthState.is_logged_in,
                                 rx.el.div(
-                                    rx.cond(
-                                        AuthState.user_avatar != "",
-                                        rx.image(
-                                            src=AuthState.user_avatar,
-                                            class_name="h-8 w-8 rounded-full border-2 border-violet-200",
-                                        ),
-                                        rx.image(
-                                            src=rx.cond(
-                                                AuthState.user_name != "",
-                                                "https://api.dicebear.com/9.x/initials/svg?seed=" + AuthState.user_name,
-                                                "https://api.dicebear.com/9.x/initials/svg?seed=U",
+                                    rx.el.div(
+                                        rx.cond(
+                                            AuthState.user_avatar != "",
+                                            rx.image(
+                                                src=AuthState.user_avatar,
+                                                class_name="h-8 w-8 rounded-full border-2 border-violet-200",
                                             ),
-                                            class_name="h-8 w-8 rounded-full border-2 border-violet-200",
+                                            rx.image(
+                                                src=rx.cond(
+                                                    AuthState.user_name != "",
+                                                    "https://api.dicebear.com/9.x/initials/svg?seed=" + AuthState.user_name,
+                                                    "https://api.dicebear.com/9.x/initials/svg?seed=U",
+                                                ),
+                                                class_name="h-8 w-8 rounded-full border-2 border-violet-200",
+                                            ),
                                         ),
+                                        on_click=open_profile(my_relack_username()),
+                                        title="View profile",
+                                        class_name="cursor-pointer" if _HAS_INTENT else "",
                                     ),
                                     rx.el.span(
                                         AuthState.user_name,
@@ -429,5 +438,6 @@ def doc_list_page() -> rx.Component:
             ),
             class_name="flex flex-col h-screen w-full bg-white",
         ),
+        *([intent_host()] if _HAS_INTENT else []),
         class_name="font-['Raleway']",
     )

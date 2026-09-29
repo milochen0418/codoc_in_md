@@ -7,6 +7,24 @@ try:
 except ImportError:
     _HAS_AUTH = False
 
+try:
+    from reflex_ddns_auth.intent import Intent, intent_host
+    _HAS_INTENT = True
+except ImportError:
+    _HAS_INTENT = False
+
+
+def open_profile(user) -> list:
+    """Click handler that opens a Relack profile (username or email) as a dialog."""
+    if not _HAS_INTENT:
+        return []
+    return [Intent.start("relack", "profile.view", user=user)]
+
+
+def my_relack_username():
+    """Relack username of the signed-in user: email for Google, nickname for guests."""
+    return rx.cond(AuthState.user_email != "", AuthState.user_email, AuthState.user_name)
+
 
 def user_avatar(user: dict) -> rx.Component:
     """Displays a user's avatar with a tooltip. Uses Google avatar if available."""
@@ -23,7 +41,7 @@ def user_avatar(user: dict) -> rx.Component:
             alt=user["name"],
         ),
     )
-    return rx.el.div(
+    avatar = rx.el.div(
         rx.el.div(
             avatar_img,
             rx.el.div(
@@ -34,6 +52,17 @@ def user_avatar(user: dict) -> rx.Component:
         ),
         class_name="group",
         title=user["name"],
+    )
+    if not _HAS_INTENT:
+        return avatar
+    return rx.cond(
+        user["id"].contains("@"),
+        rx.el.div(
+            avatar,
+            on_click=open_profile(user["id"]),
+            class_name="cursor-pointer",
+        ),
+        avatar,
     )
 
 
@@ -222,16 +251,21 @@ def user_identity() -> rx.Component:
         return guest_view
 
     logged_in_view = rx.el.div(
-        rx.cond(
-            AuthState.user_avatar != "",
-            rx.image(
-                src=AuthState.user_avatar,
-                class_name="h-7 w-7 rounded-full border-2 border-violet-200",
+        rx.el.div(
+            rx.cond(
+                AuthState.user_avatar != "",
+                rx.image(
+                    src=AuthState.user_avatar,
+                    class_name="h-7 w-7 rounded-full border-2 border-violet-200",
+                ),
+                rx.image(
+                    src="https://api.dicebear.com/9.x/initials/svg?seed=" + AuthState.user_name,
+                    class_name="h-7 w-7 rounded-full border-2 border-violet-200",
+                ),
             ),
-            rx.image(
-                src="https://api.dicebear.com/9.x/initials/svg?seed=" + AuthState.user_name,
-                class_name="h-7 w-7 rounded-full border-2 border-violet-200",
-            ),
+            on_click=open_profile(my_relack_username()),
+            title="View profile",
+            class_name="cursor-pointer" if _HAS_INTENT else "",
         ),
         rx.el.span(
             AuthState.user_name,
@@ -485,5 +519,6 @@ def header() -> rx.Component:
         ),
         # --- Mobile dropdown panel ---
         mobile_menu_panel(),
+        *([intent_host()] if _HAS_INTENT else []),
         class_name="relative border-b border-gray-200 bg-white shadow-sm",
     )
