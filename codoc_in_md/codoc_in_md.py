@@ -7,6 +7,7 @@ from codoc_in_md.components.header import header
 from codoc_in_md.components.sidebar import sidebar
 from codoc_in_md.components.markdown_clean import CleanMarkdown
 from codoc_in_md.components.doc_list import doc_list_page
+from codoc_in_md.components.call_views import call_keepalive, incoming_call
 
 from codoc_in_md import embeds
 from codoc_in_md.embeds import register_backend_embed_routes
@@ -255,6 +256,7 @@ def index() -> rx.Component:
             ),
             class_name="flex flex-col h-screen w-full bg-white",
         ),
+        incoming_call(),
         class_name="font-['Raleway']",
     )
 
@@ -294,8 +296,9 @@ except ImportError:
 
 try:
     from reflex_ddns_auth.intent import install_intent_host
-    # Intent dialogs (Relack profiles) are hosted once, above every page.
+    # Intent dialogs (Relack profiles, calls) are hosted once, above every page.
     install_intent_host(app)
+    app.extra_app_wraps[(8, "CodocCallKeepalive")] = lambda stateful: rx.fragment(call_keepalive())
 except ImportError:
     pass
 

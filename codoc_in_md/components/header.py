@@ -1,5 +1,6 @@
 import reflex as rx
 from codoc_in_md.state import EditorState
+from codoc_in_md.components.call_views import call_button, mobile_call_item
 
 try:
     from reflex_ddns_auth import AuthState
@@ -423,6 +424,7 @@ def mobile_menu_panel() -> rx.Component:
             ),
             # Other actions
             rx.el.div(
+                mobile_call_item(_mobile_menu_item_cls(), EditorState.set_mobile_menu_open(False)),
                 rx.el.button(
                     rx.icon("share-2", class_name="h-4 w-4"),
                     "Share Link",
@@ -494,6 +496,7 @@ def header() -> rx.Component:
                         rx.foreach(EditorState.users, user_avatar),
                         class_name="flex -space-x-2 mr-4",
                     ),
+                    call_button(),
                     document_dropdown(),
                     export_dropdown(),
                     rx.el.button(

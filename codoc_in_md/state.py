@@ -9,6 +9,8 @@ import logging
 from typing import TypedDict, Optional
 from pathlib import Path
 
+from .call import CallState
+
 from .embeds import (
     apply_hackmd_mathjax_delimiters,
     apply_hackmd_code_blocks_with_lines,
@@ -666,6 +668,9 @@ class EditorState(rx.State):
                     break
                 if display_users != self.users:
                     self.users = display_users
+                # The document's call: how many are in it, whether it rings us.
+                calls = await self.get_state(CallState)
+                calls._refresh(current_doc_id, self.my_user_id)
 
             # Document sync is now handled by Yjs (CRDT) via
             # assets/yjs_collab.js + the /yjs/{doc_id} WebSocket relay.

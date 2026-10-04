@@ -118,6 +118,35 @@ Artifacts (screenshots/logs) are written to `testcases/<suite_name>/output/`.
 3) **Switch view modes**
      - Use **Split / Editor / Preview** to match your workflow.
 
+4) **Call everyone on the document**
+     - **Call everyone** in the header calls the people viewing the document: each of them gets an
+       incoming call (Accept / Decline) for 45 seconds.
+     - While the call is on, everyone on the document, including people who open it later, sees
+       **Join call · N** (N = people in the call) and can join.
+     - Other dialogs (e.g. a Relack profile), the **–** button or a click outside minimize the call to a
+       tray at the bottom left; it keeps running. Hang up, or close it from the tray, to leave.
+
+## Calls
+
+The call runs in a separate call app, opened in a dialog through the DDNS Intent `call.join`
+([reflex_ddns_auth](https://github.com/milochen0418/reflex_ddns_auth)), e.g. the self-hosted
+[LiveKit audio chat](https://github.com/milochen0418/reflex_ddns_livekit_audio_chat). On re-ddns the
+app that provides `call.join` is found through the intent registry; nothing to configure.
+
+Settings (all optional):
+
+- `DDNS_INTENT_PROVIDER_CALL_JOIN`: the app that handles `call.join` when there is no registry, e.g.
+  `livekit` for local development.
+- `DDNS_INTENT_URL_LIVEKIT`: where that app runs, for local development (e.g. `http://localhost:3200`).
+- `CODOC_CALL_APP`: always use this app, skipping the registry.
+
+E2E suite (the call app must be running at `DDNS_INTENT_URL_LIVEKIT`):
+
+```bash
+DDNS_INTENT_PROVIDER_CALL_JOIN=livekit DDNS_INTENT_URL_LIVEKIT=http://localhost:3200 \
+poetry run ./run_test_suite.sh doc_call
+```
+
 ## Tech Stack
 
 - **Reflex**: Full-stack Python web framework
