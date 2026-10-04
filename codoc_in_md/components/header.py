@@ -8,17 +8,21 @@ except ImportError:
     _HAS_AUTH = False
 
 try:
-    from reflex_ddns_auth.intent import Intent, intent_host
+    from reflex_ddns_auth.intent import Intent
     _HAS_INTENT = True
 except ImportError:
     _HAS_INTENT = False
 
 
 def open_profile(user) -> list:
-    """Click handler that opens a Relack profile (username or email) as a dialog."""
+    """Click handler that opens a Relack profile (username or email) as a dialog.
+
+    The username is often an email, so it is passed privately: it stays out of
+    the dialog's URL (and so out of logs and history).
+    """
     if not _HAS_INTENT:
         return []
-    return [Intent.start("relack", "profile.view", user=user)]
+    return [Intent.start("relack", "profile.view", private={"user": user})]
 
 
 def my_relack_username():
@@ -519,6 +523,5 @@ def header() -> rx.Component:
         ),
         # --- Mobile dropdown panel ---
         mobile_menu_panel(),
-        *([intent_host()] if _HAS_INTENT else []),
         class_name="relative border-b border-gray-200 bg-white shadow-sm",
     )

@@ -5,9 +5,6 @@ import reflex as rx
 from codoc_in_md.components.header import _HAS_INTENT, my_relack_username, open_profile
 from codoc_in_md.state import SEARCH_INPUT_ID, DocListState, EditorState
 
-if _HAS_INTENT:
-    from reflex_ddns_auth.intent import intent_host
-
 try:
     from reflex_ddns_auth import AuthState
     _HAS_AUTH = True
@@ -438,6 +435,5 @@ def doc_list_page() -> rx.Component:
             ),
             class_name="flex flex-col h-screen w-full bg-white",
         ),
-        *([intent_host()] if _HAS_INTENT else []),
         class_name="font-['Raleway']",
     )

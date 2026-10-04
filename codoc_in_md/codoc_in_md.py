@@ -292,6 +292,13 @@ try:
 except ImportError:
     _auth_on_load = []
 
+try:
+    from reflex_ddns_auth.intent import install_intent_host
+    # Intent dialogs (Relack profiles) are hosted once, above every page.
+    install_intent_host(app)
+except ImportError:
+    pass
+
 from codoc_in_md.components.auth_debug import auth_debug_page, AuthDebugState
 app.add_page(index, route="/doc/[document_id]", on_load=[*_auth_on_load, EditorState.on_load])
 app.add_page(doc_list_page, route="/", on_load=[*_auth_on_load, DocListState.load_documents])
