@@ -133,10 +133,15 @@ The call runs in a separate call app, opened in a dialog through the DDNS Intent
 [LiveKit audio chat](https://github.com/milochen0418/reflex_ddns_livekit_audio_chat). On re-ddns the
 app that provides `call.join` is found through the intent registry; nothing to configure.
 
+If several apps provide `call.join` (e.g. audio, video and avatar chat), whoever starts the call
+chooses one. The call keeps that choice: everyone who accepts or joins later goes straight into the
+same app, without being asked, because calls in different apps can't reach each other. The next
+call is chosen afresh.
+
 Settings (all optional):
 
-- `DDNS_INTENT_PROVIDER_CALL_JOIN`: the app that handles `call.join` when there is no registry, e.g.
-  `livekit` for local development.
+- `DDNS_INTENT_PROVIDER_CALL_JOIN`: the app(s) that handle `call.join` when there is no registry,
+  comma-separated, e.g. `livekit` for local development.
 - `DDNS_INTENT_URL_LIVEKIT`: where that app runs, for local development (e.g. `http://localhost:3200`).
 - `CODOC_CALL_APP`: always use this app, skipping the registry.
 
@@ -145,6 +150,14 @@ E2E suite (the call app must be running at `DDNS_INTENT_URL_LIVEKIT`):
 ```bash
 DDNS_INTENT_PROVIDER_CALL_JOIN=livekit DDNS_INTENT_URL_LIVEKIT=http://localhost:3200 \
 poetry run ./run_test_suite.sh doc_call
+```
+
+Choosing among several call apps: the same call app also stands in as a second one, `livekit-alt`,
+reached at `127.0.0.1` (another origin):
+
+```bash
+DDNS_INTENT_PROVIDER_CALL_JOIN=livekit,livekit-alt DDNS_INTENT_URL_LIVEKIT=http://localhost:3200 \
+DDNS_INTENT_URL_LIVEKIT_ALT=http://127.0.0.1:3200 poetry run ./run_test_suite.sh doc_call_app_choice
 ```
 
 ## Tech Stack

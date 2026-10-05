@@ -3,8 +3,8 @@
 codoc keeps who is in each document's call and rings the people viewing it; the
 call itself runs in the call app, opened in the intent dialog:
 
-    Intent.start(None, "call.join", private={"room": <call id>}, keep_alive=True, single=True,
-                 title=..., user=..., name=...)
+    Intent.start(<call app>, "call.join", private={"room": <call id>}, keep_alive=True,
+                 single=True, title=..., user=..., name=...)
 
 - Anyone viewing a document can call everyone on it: the others get an incoming
   call (Accept / Decline) for RING_SECONDS.
@@ -13,10 +13,13 @@ call itself runs in the call app, opened in the intent dialog:
 - The call dialog is keep-alive (other dialogs minimize it to the tray) and
   single (joining another call closes it).
 
-The call app is whichever installed app provides `call.join` (the DDNS Intent
-registry; `DDNS_INTENT_PROVIDER_CALL_JOIN` for local dev), unless
-`CODOC_CALL_APP` names one. The call id is private: anyone holding it can join
-the call, so it stays out of the iframe URL.
+Whoever starts a call chooses its app among the installed apps that provide
+`call.join` (the DDNS Intent registry; `DDNS_INTENT_PROVIDER_CALL_JOIN` for
+local dev), through `Intent.choose_app`, which asks only when there are several.
+The call keeps that app, so everyone who answers or joins later opens the same
+app, and so the same call, without being asked. `CODOC_CALL_APP` names the app
+for every call instead. The call id is private: anyone holding it can join the
+call, so it stays out of the iframe URL.
 
 Like presence (`state.SharedState`), calls live in this process's memory.
 """
@@ -54,6 +57,8 @@ class Member(TypedDict):
 
 class DocCall(TypedDict):
     call_id: str
+    # The call app chosen by whoever started the call: everyone joins through it.
+    app: str
     started_by_name: str
     started_at: float
     ringing: bool
@@ -85,12 +90,15 @@ class CallStore:
             del cls.calls[doc_id]
 
     @classmethod
-    def join(cls, doc_id: str, token: str, member: Member, now: float, call_id: str = "") -> DocCall:
-        """Join the document's call, starting it (ringing everyone) if there is none."""
+    def join(
+        cls, doc_id: str, token: str, member: Member, now: float, app: str, call_id: str = ""
+    ) -> DocCall:
+        """Join the document's call, starting it in ``app`` (ringing everyone) if there is none."""
         call = cls.calls.get(doc_id)
         if call is None:
             call = DocCall(
                 call_id=call_id or secrets.token_urlsafe(12),
+                app=app,
                 started_by_name=member["name"],
                 started_at=now,
                 # A call put back after being dropped (call_id given) doesn't ring again.
@@ -133,7 +141,11 @@ class CallState(rx.State):
     call_count: int = 0
     ringing_from: str = ""
     _call_id: str = ""
+    # The call's app, to put the call back as it was.
+    _call_app: str = ""
     _joined_at: float = 0.0
+    # Document of the call this tab starts, while its caller chooses the call app.
+    _starting_doc: str = ""
 
     async def _me(self) -> tuple[str, str, str]:
         """(document on screen, user id, display name) of this tab."""
@@ -164,6 +176,23 @@ class CallState(rx.State):
     @rx.event
     async def join_call(self):
         """Call everyone on the document, or join its call, and open it in the dialog."""
+        return await self._join(CALL_APP or "")
+
+    @rx.event
+    async def start_call(self, data: dict):
+        """The caller chose the call app: call everyone on the document with it."""
+        doc_id, self._starting_doc = self._starting_doc, ""
+        on_screen, _, _ = await self._me()
+        if doc_id and doc_id == on_screen and data.get("app"):
+            # Joins instead if someone called everyone on the document meanwhile.
+            return await self._join(data["app"])
+
+    async def _join(self, app: str):
+        """Join the document's call in its app, or start the call in ``app``.
+
+        Without ``app``, a new call first lets the caller choose it
+        (``start_call`` comes back here with it).
+        """
         if not CALLS_ENABLED:
             return
         doc_id, user_id, name = await self._me()
@@ -173,15 +202,20 @@ class CallState(rx.State):
         if self.current_doc == doc_id and CALL_ACTION in dialog.open_actions:
             # Already in this call (maybe minimized): bring it back rather than rejoin.
             return Intent.show(CALL_ACTION)
+        if doc_id not in CallStore.calls and not app:
+            # Everyone who joins later opens the app chosen now: other apps can't reach the call.
+            self._starting_doc = doc_id
+            return Intent.choose_app(CALL_ACTION, on_result=CallState.start_call)
 
         now = time.time()
         token = self.router.session.client_token
         if self.current_doc and self.current_doc != doc_id:
             # Switching calls: the old dialog's on_cancel comes too late to know which one.
             CallStore.leave(self.current_doc, token)
-        call = CallStore.join(doc_id, token, Member(id=user_id, name=name), now)
+        call = CallStore.join(doc_id, token, Member(id=user_id, name=name), now, app)
         self.current_doc = doc_id
         self._call_id = call["call_id"]
+        self._call_app = call["app"]
         self._joined_at = now
         self._refresh(doc_id, user_id)
 
@@ -190,7 +224,7 @@ class CallState(rx.State):
         doc = DOCUMENTS_STORE.get(doc_id)
         title = doc["title"] if doc else doc_id
         return Intent.start(
-            CALL_APP,
+            call["app"],
             CALL_ACTION,
             on_result=CallState.call_closed,
             on_cancel=CallState.call_closed,
@@ -253,4 +287,6 @@ class CallState(rx.State):
             # Touch our entry, or put the call back if it was dropped (e.g. this tab
             # slept past STALE_SECONDS) while the dialog still runs it.
             _, user_id, name = await self._me()
-            CallStore.join(doc_id, token, Member(id=user_id, name=name), now, call_id=self._call_id)
+            CallStore.join(
+                doc_id, token, Member(id=user_id, name=name), now, self._call_app, call_id=self._call_id
+            )
