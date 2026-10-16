@@ -1909,9 +1909,11 @@ def apply_hackmd_typography(markdown_text: str) -> str:
         if not segment:
             return segment
 
-        # Preserve raw HTML tags exactly; typography (especially smart quotes)
-        # must not modify attribute quotes inside <...>.
-        html_tag_re = re.compile(r"</?[A-Za-z][^>]*?>")
+        # Preserve raw HTML tags and comments exactly; typography (especially
+        # smart quotes) must not modify attribute quotes inside <...>, and
+        # turning the dashes of `<!-- ... -->` into en dashes would make the
+        # comment show up as text in the preview.
+        html_tag_re = re.compile(r"<!--.*?-->|</?[A-Za-z][^>]*?>", re.DOTALL)
 
         def _apply_typography_preserving_html(s: str) -> str:
             if not s:
