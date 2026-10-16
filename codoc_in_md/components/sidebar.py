@@ -100,7 +100,9 @@ def sidebar() -> rx.Component:
                             ),
                             rx.el.div(
                                 class_name="w-2 h-2 rounded-full mr-2",
-                                style={"background-color": EditorState.my_user_color},
+                                style={"background-color": rx.cond(
+                                    EditorState.my_doc_color != "", EditorState.my_doc_color, EditorState.my_user_color
+                                )},
                             ),
                         ),
                         rx.el.span(

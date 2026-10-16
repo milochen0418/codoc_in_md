@@ -12,6 +12,10 @@
  *   5. Bind Y.Text ↔ Monaco model via MonacoBinding.
  *   6. Monaco's on_change (handled by reflex-monaco) naturally fires for
  *      both local and remote edits, keeping the Reflex preview in sync.
+ *   7. Remote cursors (HackMD-style): everyone's caret and selection in their
+ *      own color, with a name tag that shows while they move or type and on
+ *      hover. Name and color come from data-codoc-user-* on the editor panel
+ *      and travel in the Yjs awareness state.
  *
  * "First client" problem:
  *   The relay server is stateless – it only forwards messages.  When the
@@ -73,6 +77,91 @@
     return null;
   };
 
+  /* ================================================================== */
+  /*  Remote cursors (HackMD-style)                                      */
+  /* ================================================================== */
+
+  const TAG_SHOW_MS = 2000; // a name tag stays up this long after its owner moves
+  const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+  const FALLBACK_COLOR = "#1E88E5";
+
+  const safeColor = (c) => (typeof c === "string" && HEX_COLOR.test(c) ? c : FALLBACK_COLOR);
+
+  const rgba = (hex, alpha) => {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  };
+
+  /** Dark text on light colors, white text on the others. */
+  const tagTextColor = (hex) => {
+    const n = parseInt(hex.slice(1), 16);
+    const lin = (v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    };
+    const lum = 0.2126 * lin(n >> 16) + 0.7152 * lin((n >> 8) & 255) + 0.0722 * lin(n & 255);
+    return lum > 0.3 ? "#111827" : "#ffffff";
+  };
+
+  const CURSOR_CSS = `
+.yRemoteSelection { background-color: ${rgba(FALLBACK_COLOR, 0.25)}; }
+.yRemoteSelectionHead {
+  position: absolute; height: 100%; box-sizing: border-box; margin-left: -1px;
+  border-left: 2px solid ${FALLBACK_COLOR}; pointer-events: none;
+}
+.codoc-cursor-tag {
+  padding: 0 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; pointer-events: none;
+  font: 600 11px/16px system-ui, -apple-system, "Segoe UI", sans-serif;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); opacity: 0; transition: opacity 0.15s;
+}
+.codoc-cursor-tag.is-visible { opacity: 1; }
+`;
+
+  let cursorStyleEl = null;
+
+  /** One stylesheet with every remote person's color, keyed by Yjs clientID. */
+  const updateCursorStyles = (states, selfID) => {
+    let css = CURSOR_CSS;
+    states.forEach((state, id) => {
+      if (id === selfID || !Number.isInteger(id)) return;
+      const color = safeColor(state.user && state.user.color);
+      css += `.yRemoteSelection-${id} { background-color: ${rgba(color, 0.25)}; }\n`;
+      css += `.yRemoteSelectionHead-${id} { border-left-color: ${color}; }\n`;
+    });
+    if (!cursorStyleEl || !cursorStyleEl.isConnected) {
+      cursorStyleEl = document.createElement("style");
+      cursorStyleEl.id = "codoc-remote-cursors";
+      document.head.appendChild(cursorStyleEl);
+    }
+    if (cursorStyleEl.textContent !== css) cursorStyleEl.textContent = css;
+  };
+
+  /** A remote person's name tag: a Monaco content widget just above their caret. */
+  class CursorTag {
+    constructor(m, clientID) {
+      this._m = m;
+      this._id = "codoc.cursorTag." + clientID;
+      this.node = document.createElement("div");
+      this.node.className = "codoc-cursor-tag";
+      this.position = null;
+      this.active = false; // moved or typed in the last TAG_SHOW_MS
+      this.hovered = false;
+      this.timer = 0;
+    }
+
+    getId() { return this._id; }
+
+    getDomNode() { return this.node; }
+
+    getPosition() {
+      if (!this.position) return null;
+      const P = this._m.editor.ContentWidgetPositionPreference;
+      return { position: this.position, preference: [P.ABOVE, P.BELOW] };
+    }
+
+    refresh() { this.node.classList.toggle("is-visible", this.active || this.hovered); }
+  }
+
   /**
    * Bi-directional binding between a Y.Text and a Monaco ITextModel.
    *
@@ -109,13 +198,17 @@
       };
       this.doc.on("beforeAllTransactions", this._beforeTransaction);
 
-      /* --- remote cursor decorations --- */
+      /* --- remote cursors: caret/selection decorations + name tags --- */
       this._decorations = new Map();
+      this._tags = new Map(); // editor -> Map(clientID -> CursorTag)
+      this._spots = new Map(); // editor -> Map(clientID -> { head, start, end, user })
       this._rerenderDecorations = () => {
+        if (awareness) updateCursorStyles(awareness.getStates(), this.doc.clientID);
         editors.forEach((editor) => {
           if (awareness && editor.getModel() === monacoModel) {
             const cur = this._decorations.get(editor) || [];
             const next = [];
+            const spots = new Map();
             awareness.getStates().forEach((state, clientID) => {
               if (
                 clientID !== this.doc.clientID &&
@@ -146,10 +239,22 @@
                       beforeContentClassName: before,
                     },
                   });
+                  spots.set(clientID, {
+                    head: monacoModel.getPositionAt(hAbs.index),
+                    start,
+                    end,
+                    user: state.user,
+                  });
                 }
               }
             });
             this._decorations.set(editor, editor.deltaDecorations(cur, next));
+            this._spots.set(editor, spots);
+            try {
+              this._renderTags(editor, spots);
+            } catch (err) {
+              console.warn("[codoc-yjs] cursor tags:", err);
+            }
           } else {
             this._decorations.delete(editor);
           }
@@ -211,9 +316,10 @@
       });
 
       /* --- awareness (cursor broadcast) --- */
+      this._listeners = [];
       if (awareness) {
         editors.forEach((editor) => {
-          editor.onDidChangeCursorSelection(() => {
+          this._listeners.push(editor.onDidChangeCursorSelection(() => {
             if (editor.getModel() === monacoModel) {
               const sel = editor.getSelection();
               if (!sel) return;
@@ -227,11 +333,99 @@
                 head: Y.createRelativePositionFromTypeIndex(ytext, head),
               });
             }
-          });
-          awareness.on("change", this._rerenderDecorations);
+          }));
+          // Hovering someone's caret or selection shows their name tag.
+          this._listeners.push(editor.onMouseMove((e) => this._hover(editor, e.target && e.target.position)));
+          this._listeners.push(editor.onMouseLeave(() => this._hover(editor, null)));
         });
+        // Whoever moved or typed shows their name tag for a moment, as on HackMD.
+        this._onAwarenessChange = ({ added, updated }) => {
+          this._rerenderDecorations();
+          added.concat(updated).forEach((id) => {
+            if (id !== this.doc.clientID) this._flashTag(id);
+          });
+        };
+        awareness.on("change", this._onAwarenessChange);
         this.awareness = awareness;
+        // Show the cursors that are already there (e.g. after a view-mode switch).
+        this._rerenderDecorations();
       }
+    }
+
+    _renderTags(editor, spots) {
+      let tags = this._tags.get(editor);
+      if (!tags) {
+        tags = new Map();
+        this._tags.set(editor, tags);
+      }
+      Array.from(tags.keys()).forEach((id) => {
+        if (!spots.has(id)) this._removeTag(editor, tags, id);
+      });
+      spots.forEach(({ head, user }, id) => {
+        const name = (user && typeof user.name === "string" && user.name.trim()) || "Guest";
+        const color = safeColor(user && user.color);
+        let tag = tags.get(id);
+        const isNew = !tag;
+        if (isNew) {
+          tag = new CursorTag(this._m, id);
+          tags.set(id, tag);
+        }
+        if (tag.node.textContent !== name) tag.node.textContent = name;
+        tag.node.style.backgroundColor = color;
+        tag.node.style.color = tagTextColor(color);
+        const moved = !tag.position || tag.position.lineNumber !== head.lineNumber || tag.position.column !== head.column;
+        tag.position = { lineNumber: head.lineNumber, column: head.column };
+        if (isNew) {
+          editor.addContentWidget(tag);
+          this._flashTag(id); // a cursor that just appeared here shows its name too
+        } else if (moved) {
+          editor.layoutContentWidget(tag);
+        }
+      });
+    }
+
+    _removeTag(editor, tags, id) {
+      const tag = tags.get(id);
+      if (!tag) return;
+      clearTimeout(tag.timer);
+      try { editor.removeContentWidget(tag); } catch { /* editor already disposed */ }
+      tags.delete(id);
+    }
+
+    _flashTag(clientID) {
+      this._tags.forEach((tags) => {
+        const tag = tags.get(clientID);
+        if (!tag) return;
+        tag.active = true;
+        tag.refresh();
+        clearTimeout(tag.timer);
+        tag.timer = setTimeout(() => {
+          tag.active = false;
+          tag.refresh();
+        }, TAG_SHOW_MS);
+      });
+    }
+
+    _hover(editor, pos) {
+      const tags = this._tags.get(editor);
+      if (!tags) return;
+      const spots = this._spots.get(editor) || new Map();
+      let hit = null;
+      if (pos) {
+        spots.forEach(({ head, start, end }, id) => {
+          if (hit !== null) return;
+          const nearCaret = pos.lineNumber === head.lineNumber && Math.abs(pos.column - head.column) <= 1;
+          const range = new this._m.Range(start.lineNumber, start.column, end.lineNumber, end.column);
+          if (nearCaret || (!range.isEmpty() && range.containsPosition(pos))) hit = id;
+        });
+      }
+      tags.forEach((tag, id) => {
+        const hovered = id === hit;
+        if (tag.hovered !== hovered) {
+          tag.hovered = hovered;
+          tag.refresh();
+        }
+      });
     }
 
     destroy() {
@@ -239,8 +433,18 @@
       try { this._monacoDisposeHandler.dispose(); } catch {}
       try { this.ytext.unobserve(this._ytextObserver); } catch {}
       try { this.doc.off("beforeAllTransactions", this._beforeTransaction); } catch {}
+      this._listeners.forEach((l) => { try { l.dispose(); } catch {} });
+      this._listeners = [];
+      this._tags.forEach((tags, editor) => {
+        Array.from(tags.keys()).forEach((id) => this._removeTag(editor, tags, id));
+      });
+      this._tags.clear();
+      this._decorations.forEach((ids, editor) => { try { editor.deltaDecorations(ids, []); } catch {} });
+      this._decorations.clear();
       if (this.awareness) {
-        try { this.awareness.off("change", this._rerenderDecorations); } catch {}
+        try { this.awareness.off("change", this._onAwarenessChange); } catch {}
+        // This editor is gone: stop showing our caret to the others.
+        try { this.awareness.setLocalStateField("selection", null); } catch {}
       }
     }
   }
@@ -303,6 +507,28 @@
     return attr("codoc-doc-id") === docId && attr("codoc-loading") === "false";
   };
 
+  /** This person's name and color for their cursor (data-codoc-user-* on the editor panel). */
+  const readLocalUser = () => {
+    const el = document.querySelector("[data-codoc-user-name], [data_codoc_user_name]");
+    if (!el) return null;
+    const attr = (name) => el.getAttribute("data-" + name) ?? el.getAttribute("data_" + name.replace(/-/g, "_"));
+    const name = (attr("codoc-user-name") || "").trim();
+    const color = attr("codoc-user-color") || "";
+    return name && HEX_COLOR.test(color) ? { name, color } : null;
+  };
+
+  /** Publish our name and color (again, when they change) with our cursor. */
+  const syncLocalUser = () => {
+    const awareness = provider && provider.awareness;
+    if (!awareness) return;
+    const user = readLocalUser();
+    if (!user) return;
+    const cur = (awareness.getLocalState() || {}).user;
+    if (!cur || cur.name !== user.name || cur.color !== user.color) {
+      awareness.setLocalStateField("user", user);
+    }
+  };
+
   /** Return the first Monaco ICodeEditor instance, or null. */
   const getEditor = () => {
     try {
@@ -327,6 +553,9 @@
   const destroyAll = () => {
     destroyBinding();
     if (provider) {
+      // Tell the others we left, so our cursor disappears now rather than
+      // after y-protocols' 30 s awareness timeout.
+      try { provider.awareness.setLocalState(null); } catch { /* ignore */ }
       try { provider.destroy(); } catch { /* ignore */ }
       provider = null;
     }
@@ -375,7 +604,17 @@
 
       // Connect to the backend Yjs relay.
       const wsBase = getWsBase();
-      provider = new WsProvider(wsBase, docId, ydoc);
+      const prov = new WsProvider(wsBase, docId, ydoc);
+      provider = prov;
+
+      // The relay keeps no awareness state, so ask the others for theirs
+      // (y-websocket's messageQueryAwareness); otherwise their cursors would
+      // only appear when they next move, or after up to 15 s.
+      prov.on("status", ({ status }) => {
+        if (status !== "connected" || !prov.ws) return;
+        try { prov.ws.send(new Uint8Array([3])); } catch { /* ignore */ }
+      });
+      syncLocalUser();
 
       // Wait for sync (another client responds) or timeout (we're first).
       await new Promise((resolve) => {
@@ -455,6 +694,8 @@
       setup(docId);
       return;
     }
+
+    syncLocalUser();
 
     // Monaco remounts (view-mode switch, Reflex re-seeding the editor) create a
     // new model while the old binding lingers on the disposed one.

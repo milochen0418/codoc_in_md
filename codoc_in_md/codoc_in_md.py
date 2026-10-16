@@ -42,6 +42,9 @@ def editor_panel() -> rx.Component:
         # loaded content of the document in the URL.
         data_codoc_doc_id=EditorState.doc_id,
         data_codoc_loading=EditorState.is_loading,
+        # Shown to the others with this user's cursor (name tag and color).
+        data_codoc_user_name=EditorState.my_user_name,
+        data_codoc_user_color=EditorState.my_doc_color,
         class_name="h-full w-full",
     )
 

@@ -24,7 +24,10 @@ and review Markdown docs in one place.
     - **Split**: Editor + preview side-by-side
     - **Editor**: Focused writing
     - **Preview**: Focused reading
-- **Presence indicators**: Shows active collaborators with randomly generated display names and colors.
+- **Remote cursors (HackMD-style)**: Everyone's caret and selection show in the editor in their own color, with a
+    name tag that appears while they type or move and when you hover their caret.
+- **Presence indicators**: Shows who is on the document. Each avatar is ringed in the color of that person's cursor,
+    and no two people on a document share a color.
 
 ## Getting Started
 

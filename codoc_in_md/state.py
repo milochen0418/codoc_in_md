@@ -5,6 +5,7 @@ import asyncio
 import time
 import random
 import uuid
+import zlib
 import logging
 from typing import TypedDict, Optional
 from pathlib import Path
@@ -344,12 +345,32 @@ class _DocumentStore:
 DOCUMENTS_STORE = _DocumentStore()
 
 
+# Presence and cursor colors: distinct, visible as a caret on the white editor,
+# and readable behind a name tag.
+USER_COLORS = [
+    "#E53935",  # red
+    "#1E88E5",  # blue
+    "#43A047",  # green
+    "#8E24AA",  # purple
+    "#F4511E",  # orange
+    "#00897B",  # teal
+    "#D81B60",  # pink
+    "#3949AB",  # indigo
+    "#6D4C41",  # brown
+    "#0097A7",  # cyan
+    "#7CB342",  # light green
+    "#5E35B1",  # deep purple
+]
+
+
 class User(TypedDict):
     id: str
     name: str
-    color: str
+    color: str  # the color the user prefers
     last_seen: float
     avatar_url: str
+    joined_at: float  # when they arrived on the document
+    doc_color: str  # the color they show on the document (cursor, avatar ring)
 
 
 class DisplayUser(TypedDict):
@@ -398,19 +419,32 @@ class SharedState:
 
     @classmethod
     def update_user(cls, doc_id: str, user: User):
-        if doc_id not in cls.users:
-            cls.users[doc_id] = {}
-        cls.users[doc_id][user["id"]] = user
+        room = cls.users.setdefault(doc_id, {})
+        prev = room.get(user["id"])
+        if prev:
+            # Keep when they arrived and their color here for as long as they stay.
+            user["joined_at"] = prev.get("joined_at", user["joined_at"])
+            user["doc_color"] = prev.get("doc_color", "")
+        room[user["id"]] = user
 
     @classmethod
     def get_active_users(cls, doc_id: str) -> list[User]:
         if doc_id not in cls.users:
             return []
         now = time.time()
-        cls.users[doc_id] = {
-            uid: u for uid, u in cls.users[doc_id].items() if now - u["last_seen"] < 10
-        }
-        return list(cls.users[doc_id].values())
+        room = {uid: u for uid, u in cls.users[doc_id].items() if now - u["last_seen"] < 10}
+        cls.users[doc_id] = room
+        # Everyone on a document gets a different color, so their cursors can be told
+        # apart: earlier arrivals keep theirs, a later one whose color is taken gets
+        # the first free one.
+        taken: set[str] = set()
+        for u in sorted(room.values(), key=lambda u: (u.get("joined_at", 0.0), u["id"])):
+            color = u.get("doc_color") or u["color"]
+            if color in taken:
+                color = next((c for c in USER_COLORS if c not in taken), color)
+            u["doc_color"] = color
+            taken.add(color)
+        return list(room.values())
 
 
 class EditorState(rx.State):
@@ -423,6 +457,8 @@ class EditorState(rx.State):
     my_user_id: str = ""
     my_user_name: str = ""
     my_user_color: str = ""
+    # This user's color on the current document (see SharedState.get_active_users).
+    my_doc_color: str = ""
     my_user_email: str = ""
     my_user_avatar: str = ""
     is_authenticated: bool = False
@@ -467,17 +503,6 @@ class EditorState(rx.State):
 
     async def _generate_user_info(self):
         """Use SSO auth info if available, otherwise generate random identity."""
-        colors = [
-            "#FF5733",
-            "#33FF57",
-            "#3357FF",
-            "#F033FF",
-            "#FF33A8",
-            "#33FFF5",
-            "#F5FF33",
-            "#FF8C33",
-        ]
-
         try:
             from reflex_ddns_auth import AuthState
             auth = await self.get_state(AuthState)
@@ -488,7 +513,8 @@ class EditorState(rx.State):
                 self.my_user_name = auth.user_name or auth.user_email
                 self.my_user_email = auth.user_email
                 self.my_user_avatar = auth.user_avatar
-                self.my_user_color = colors[hash(auth.user_email) % len(colors)]
+                # Stable across restarts (unlike hash()), so a person keeps their color.
+                self.my_user_color = USER_COLORS[zlib.crc32(auth.user_email.encode()) % len(USER_COLORS)]
                 self.is_authenticated = True
                 return
         except ImportError:
@@ -498,7 +524,10 @@ class EditorState(rx.State):
         # coming from a logged-in identity (or on first visit).
         if self.is_authenticated or not self.my_user_id:
             self.my_user_id = str(random.randint(10000, 99999))
-            self.my_user_color = random.choice(colors)
+            self.my_user_color = random.choice(USER_COLORS)
+        elif self.my_user_color not in USER_COLORS:
+            # A session from before the current palette.
+            self.my_user_color = random.choice(USER_COLORS)
         self.is_authenticated = False
         self.my_user_name = "Guest"
         self.my_user_email = ""
@@ -644,12 +673,15 @@ class EditorState(rx.State):
                 if not self.is_syncing:
                     break
                 current_doc_id = self.doc_id
+                now = time.time()
                 me: User = {
                     "id": self.my_user_id,
                     "name": self.my_user_name,
                     "color": self.my_user_color,
-                    "last_seen": time.time(),
+                    "last_seen": now,
                     "avatar_url": self.my_user_avatar,
+                    "joined_at": now,
+                    "doc_color": "",
                 }
 
             # Keep ephemeral presence tracking server-side.
@@ -658,9 +690,12 @@ class EditorState(rx.State):
             current_users.sort(key=lambda u: u["name"])
 
             display_users: list[DisplayUser] = [
-                {"id": u["id"], "name": u["name"], "color": u["color"], "avatar_url": u.get("avatar_url", "")}
+                {"id": u["id"], "name": u["name"], "color": u["doc_color"], "avatar_url": u.get("avatar_url", "")}
                 for u in current_users
             ]
+            my_doc_color = next(
+                (u["doc_color"] for u in current_users if u["id"] == me["id"]), me["color"]
+            )
 
             # Only write to state if something visible changed.
             async with self:
@@ -668,6 +703,8 @@ class EditorState(rx.State):
                     break
                 if display_users != self.users:
                     self.users = display_users
+                if my_doc_color != self.my_doc_color:
+                    self.my_doc_color = my_doc_color
                 # The document's call: how many are in it, whether it rings us.
                 calls = await self.get_state(CallState)
                 calls._refresh(current_doc_id, self.my_user_id)

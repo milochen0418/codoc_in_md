@@ -39,11 +39,14 @@ def user_avatar(user: dict) -> rx.Component:
             src=user["avatar_url"],
             class_name="h-8 w-8 rounded-full border-2 border-white object-cover",
             alt=user["name"],
+            # Ring in the color of their cursor in the editor.
+            style={"border_color": user["color"]},
         ),
         rx.image(
             src="https://api.dicebear.com/9.x/initials/svg?seed=" + user["name"],
             class_name="h-8 w-8 rounded-full border-2 border-white",
             alt=user["name"],
+            style={"border_color": user["color"]},
         ),
     )
     avatar = rx.el.div(
@@ -55,7 +58,8 @@ def user_avatar(user: dict) -> rx.Component:
             ),
             class_name="relative",
         ),
-        class_name="group",
+        # Keep the avatars round when the header is crowded.
+        class_name="group shrink-0",
         title=user["name"],
     )
     if not _HAS_INTENT:
@@ -65,7 +69,7 @@ def user_avatar(user: dict) -> rx.Component:
         rx.el.div(
             avatar,
             on_click=open_profile(user["id"]),
-            class_name="cursor-pointer",
+            class_name="cursor-pointer shrink-0",
         ),
         avatar,
     )
