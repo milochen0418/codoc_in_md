@@ -15,7 +15,8 @@
  *   7. Remote cursors (HackMD-style): everyone's caret and selection in their
  *      own color, with a name tag that shows while they move or type and on
  *      hover. Name and color come from data-codoc-user-* on the editor panel
- *      and travel in the Yjs awareness state.
+ *      and travel in the Yjs awareness state. A caret is shown only while its
+ *      owner is in the editor (focus), so readers don't park one somewhere.
  *
  * "First client" problem:
  *   The relay server is stateless – it only forwards messages.  When the
@@ -107,7 +108,12 @@
 .yRemoteSelection { background-color: ${rgba(FALLBACK_COLOR, 0.25)}; }
 .yRemoteSelectionHead {
   position: absolute; height: 100%; box-sizing: border-box; margin-left: -1px;
-  border-left: 2px solid ${FALLBACK_COLOR}; pointer-events: none;
+  border-left: 3px solid ${FALLBACK_COLOR}; color: ${FALLBACK_COLOR}; pointer-events: none;
+}
+/* A small flag on top of the caret: whose it is stays visible after the name tag fades. */
+.yRemoteSelectionHead::before {
+  content: ""; position: absolute; top: -3px; left: -5px; width: 7px; height: 7px;
+  border-radius: 2px; background: currentColor;
 }
 .codoc-cursor-tag {
   padding: 0 6px; border-radius: 4px 4px 4px 0; white-space: nowrap; pointer-events: none;
@@ -126,7 +132,7 @@
       if (id === selfID || !Number.isInteger(id)) return;
       const color = safeColor(state.user && state.user.color);
       css += `.yRemoteSelection-${id} { background-color: ${rgba(color, 0.25)}; }\n`;
-      css += `.yRemoteSelectionHead-${id} { border-left-color: ${color}; }\n`;
+      css += `.yRemoteSelectionHead-${id} { border-left-color: ${color}; color: ${color}; }\n`;
     });
     if (!cursorStyleEl || !cursorStyleEl.isConnected) {
       cursorStyleEl = document.createElement("style");
@@ -319,21 +325,32 @@
       this._listeners = [];
       if (awareness) {
         editors.forEach((editor) => {
-          this._listeners.push(editor.onDidChangeCursorSelection(() => {
-            if (editor.getModel() === monacoModel) {
-              const sel = editor.getSelection();
-              if (!sel) return;
-              let anchor = monacoModel.getOffsetAt(sel.getStartPosition());
-              let head = monacoModel.getOffsetAt(sel.getEndPosition());
-              if (sel.getDirection() === m.SelectionDirection.RTL) {
-                const tmp = anchor; anchor = head; head = tmp;
-              }
-              awareness.setLocalStateField("selection", {
-                anchor: Y.createRelativePositionFromTypeIndex(ytext, anchor),
-                head: Y.createRelativePositionFromTypeIndex(ytext, head),
-              });
+          // Our caret and selection, for the others: only while we are in the
+          // editor. Someone who clicked below the text (to focus or to scroll)
+          // and went on reading used to leave a caret parked at the end of the
+          // document for everyone else.
+          const publishSelection = () => {
+            if (editor.getModel() !== monacoModel) return;
+            const sel = editor.getSelection();
+            if (!sel) return;
+            let anchor = monacoModel.getOffsetAt(sel.getStartPosition());
+            let head = monacoModel.getOffsetAt(sel.getEndPosition());
+            if (sel.getDirection() === m.SelectionDirection.RTL) {
+              const tmp = anchor; anchor = head; head = tmp;
             }
+            awareness.setLocalStateField("selection", {
+              anchor: Y.createRelativePositionFromTypeIndex(ytext, anchor),
+              head: Y.createRelativePositionFromTypeIndex(ytext, head),
+            });
+          };
+          const hideSelection = () => {
+            try { awareness.setLocalStateField("selection", null); } catch { /* ignore */ }
+          };
+          this._listeners.push(editor.onDidChangeCursorSelection(() => {
+            if (editor.hasTextFocus()) publishSelection();
           }));
+          this._listeners.push(editor.onDidFocusEditorText(publishSelection));
+          this._listeners.push(editor.onDidBlurEditorText(hideSelection));
           // Hovering someone's caret or selection shows their name tag.
           this._listeners.push(editor.onMouseMove((e) => this._hover(editor, e.target && e.target.position)));
           this._listeners.push(editor.onMouseLeave(() => this._hover(editor, null)));
@@ -517,12 +534,26 @@
     return name && HEX_COLOR.test(color) ? { name, color } : null;
   };
 
+  let localCursorStyleEl = null;
+
+  /** Our own caret in our color as well, like the ring around our avatar. */
+  const styleLocalCursor = (color) => {
+    const css = `.monaco-editor .cursors-layer .cursor { background-color: ${color} !important; border-color: ${color} !important; }\n`;
+    if (!localCursorStyleEl || !localCursorStyleEl.isConnected) {
+      localCursorStyleEl = document.createElement("style");
+      localCursorStyleEl.id = "codoc-local-cursor";
+      document.head.appendChild(localCursorStyleEl);
+    }
+    if (localCursorStyleEl.textContent !== css) localCursorStyleEl.textContent = css;
+  };
+
   /** Publish our name and color (again, when they change) with our cursor. */
   const syncLocalUser = () => {
-    const awareness = provider && provider.awareness;
-    if (!awareness) return;
     const user = readLocalUser();
     if (!user) return;
+    styleLocalCursor(user.color);
+    const awareness = provider && provider.awareness;
+    if (!awareness) return;
     const cur = (awareness.getLocalState() || {}).user;
     if (!cur || cur.name !== user.name || cur.color !== user.color) {
       awareness.setLocalStateField("user", user);
@@ -604,7 +635,10 @@
 
       // Connect to the backend Yjs relay.
       const wsBase = getWsBase();
-      const prov = new WsProvider(wsBase, docId, ydoc);
+      // resyncInterval: now and then ask the room for anything we missed (the
+      // relay forwards blindly, so a message can be lost while someone joins
+      // or leaves), not only when connecting.
+      const prov = new WsProvider(wsBase, docId, ydoc, { resyncInterval: 10000 });
       provider = prov;
 
       // The relay keeps no awareness state, so ask the others for theirs
@@ -657,6 +691,13 @@
     const { ytext, provider: prov, ydoc: yd } = window._codocYjs;
     const model = editor.getModel();
     if (!model || !ytext) return;
+
+    // Everyone's text has to be the same string for Yjs offsets to agree: Monaco
+    // on Windows would otherwise type \r\n into a document the others keep as \n,
+    // and every cursor after such a line would be off (or shown at the end).
+    try {
+      if (model.getEOL() !== "\n") model.setEOL(window.monaco.editor.EndOfLineSequence.LF);
+    } catch { /* ignore */ }
 
     // Deferred first-client seed: if setup() could not seed because Monaco
     // was not mounted yet, do it now before creating the binding.
@@ -721,5 +762,8 @@
     start();
   }
 
+  // Say goodbye (cursor and room) when the tab closes or navigates away:
+  // mobile browsers often skip beforeunload but do fire pagehide.
   window.addEventListener("beforeunload", destroyAll);
+  window.addEventListener("pagehide", destroyAll);
 })();

@@ -412,39 +412,124 @@ FIXTURE_DOCS: dict[str, str] = {
 }
 
 
+# Seconds without a heartbeat before a tab counts as gone from a document.
+PRESENCE_TTL = 10
+# How long a tab's Reflex socket may be down before its presence loop gives up:
+# long enough for a reload or a brief network blip to reconnect, short enough
+# that a closed tab leaves the header within a moment.
+PRESENCE_DISCONNECT_GRACE = 3
+# Someone who comes straight back (reload, reconnect) gets their color again.
+PRESENCE_COLOR_MEMORY = 60
+# A page unmount followed by a mount within this long is a dev-build (React
+# StrictMode) remount, not a departure.
+PRESENCE_LEAVE_SETTLE = 0.5
+
+
+def _client_connected(token: str) -> bool:
+    """Whether the tab with this Reflex client token still has its socket open.
+
+    Reflex keeps a state's background tasks running after the tab's socket is
+    gone (the token is merely unlinked), so the presence loop has to check for
+    itself; otherwise it would keep a closed tab "present" until the backend
+    restarts.
+    """
+    try:
+        from codoc_in_md.codoc_in_md import app  # lazy: that module imports this one
+
+        namespace = app.event_namespace
+    except Exception:
+        return True
+    if namespace is None:
+        return True
+    return token in namespace.token_to_sid
+
+
 class SharedState:
-    """In-memory state for active users (ephemeral session tracking)."""
+    """In-memory presence (ephemeral, per backend process).
+
+    Entries are per tab (Reflex client token), so one tab closing never drops a
+    person who still has the document open in another tab; the header shows
+    one avatar per person.
+    """
 
     users: dict[str, dict[str, User]] = {}
+    # (doc_id, user id) -> (their color on it, when they left): given back on return.
+    _recent_colors: dict[tuple[str, str], tuple[str, float]] = {}
+    # token -> (doc_id, when): tabs whose document page unmounted (see
+    # EditorState.leave_document). Applied by whichever presence loop runs next,
+    # so the departure shows for the others even while the leaving tab's own
+    # state lock is busy with its next page.
+    pending_leaves: dict[str, tuple[str, float]] = {}
 
     @classmethod
-    def update_user(cls, doc_id: str, user: User):
+    def apply_pending_leaves(cls, now: float):
+        for token, (doc_id, left_at) in list(cls.pending_leaves.items()):
+            if now - left_at >= PRESENCE_LEAVE_SETTLE:
+                cls.pending_leaves.pop(token, None)
+                cls.remove_user(doc_id, token)
+
+    @classmethod
+    def update_user(cls, doc_id: str, token: str, user: User):
         room = cls.users.setdefault(doc_id, {})
-        prev = room.get(user["id"])
+        prev = room.get(token)
         if prev:
             # Keep when they arrived and their color here for as long as they stay.
             user["joined_at"] = prev.get("joined_at", user["joined_at"])
             user["doc_color"] = prev.get("doc_color", "")
-        room[user["id"]] = user
+        else:
+            # Their other tab, or a quick return: the same color as before.
+            same = next((u for u in room.values() if u["id"] == user["id"]), None)
+            if same:
+                user["joined_at"] = same.get("joined_at", user["joined_at"])
+                user["doc_color"] = same.get("doc_color", "")
+            else:
+                color, left_at = cls._recent_colors.get((doc_id, user["id"]), ("", 0.0))
+                if color and time.time() - left_at < PRESENCE_COLOR_MEMORY:
+                    user["doc_color"] = color
+        room[token] = user
+
+    @classmethod
+    def remove_user(cls, doc_id: str, token: str):
+        """A tab left ``doc_id`` (closed, reloaded, or went to another page)."""
+        room = cls.users.get(doc_id)
+        if room is None:
+            return
+        gone = room.pop(token, None)
+        now = time.time()
+        if gone and gone.get("doc_color"):
+            cls._recent_colors[(doc_id, gone["id"])] = (gone["doc_color"], now)
+        cls._recent_colors = {
+            k: v for k, v in cls._recent_colors.items() if now - v[1] < PRESENCE_COLOR_MEMORY
+        }
+        if not room:
+            cls.users.pop(doc_id, None)
 
     @classmethod
     def get_active_users(cls, doc_id: str) -> list[User]:
+        """Who is on ``doc_id``: one entry per person, each with a distinct color."""
+        now = time.time()
+        cls.apply_pending_leaves(now)
         if doc_id not in cls.users:
             return []
-        now = time.time()
-        room = {uid: u for uid, u in cls.users[doc_id].items() if now - u["last_seen"] < 10}
+        room = {t: u for t, u in cls.users[doc_id].items() if now - u["last_seen"] < PRESENCE_TTL}
         cls.users[doc_id] = room
+        # One entry per person (their earliest tab).
+        people: dict[str, User] = {}
+        for u in sorted(room.values(), key=lambda u: (u.get("joined_at", 0.0), u["id"])):
+            people.setdefault(u["id"], u)
         # Everyone on a document gets a different color, so their cursors can be told
         # apart: earlier arrivals keep theirs, a later one whose color is taken gets
         # the first free one.
         taken: set[str] = set()
-        for u in sorted(room.values(), key=lambda u: (u.get("joined_at", 0.0), u["id"])):
+        for u in people.values():
             color = u.get("doc_color") or u["color"]
             if color in taken:
                 color = next((c for c in USER_COLORS if c not in taken), color)
             u["doc_color"] = color
             taken.add(color)
-        return list(room.values())
+        for u in room.values():
+            u["doc_color"] = people[u["id"]]["doc_color"]
+        return list(people.values())
 
 
 class EditorState(rx.State):
@@ -464,6 +549,10 @@ class EditorState(rx.State):
     is_authenticated: bool = False
     is_connected: bool = False
     is_syncing: bool = False
+    # Bumped by each run of on_load: the presence loop of an earlier run stops.
+    _presence_gen: int = 0
+    # When the document page was left for another page (see leave_document).
+    _left_at: float = 0.0
     is_loading: bool = True
     last_version: int = 0
     view_mode: str = "split"
@@ -631,6 +720,13 @@ class EditorState(rx.State):
             self.editor_seed_content = ""
             self.editor_seed_version += 1
             await self._generate_user_info()
+            # This run reports the tab's presence from now on (a reload or another
+            # document runs on_load again; the earlier loop then stops).
+            self._presence_gen += 1
+            presence_gen = self._presence_gen
+            self._left_at = 0.0
+            token = self.router.session.client_token
+            SharedState.pending_leaves.pop(token, None)
 
         # For fixtures, prefer the asset file even if the doc exists in memory.
         if fixture_content is not None:
@@ -668,11 +764,18 @@ class EditorState(rx.State):
             self.is_connected = True
             self.is_syncing = True
             self.is_loading = False
+        gone_since: float | None = None
+        presence_doc = ""  # the document this loop last reported us on
         while True:
             async with self:
                 if not self.is_syncing:
+                    SharedState.remove_user(presence_doc, token)
                     break
+                if self._presence_gen != presence_gen:
+                    break  # a newer run of on_load reports this tab now
+                left_at = self._left_at
                 current_doc_id = self.doc_id
+                page_path = getattr(self.router.url, "path", "") or ""
                 now = time.time()
                 me: User = {
                     "id": self.my_user_id,
@@ -684,8 +787,33 @@ class EditorState(rx.State):
                     "doc_color": "",
                 }
 
+            # The page was left (see leave_document): stop, unless the unmount
+            # was a dev-build remount, which enter_document undoes within a moment.
+            if left_at:
+                if time.time() - left_at >= PRESENCE_LEAVE_SETTLE:
+                    SharedState.pending_leaves.pop(token, None)
+                    SharedState.remove_user(presence_doc, token)
+                    break
+                await asyncio.sleep(0.2)
+                continue
+            # The tab is gone once its socket has been down for a moment (a reload
+            # or a brief network blip reconnects sooner), or once it shows another
+            # page of the app (e.g. My Documents).
+            if _client_connected(token):
+                gone_since = None
+            else:
+                gone_since = gone_since or time.time()
+            if (gone_since and time.time() - gone_since > PRESENCE_DISCONNECT_GRACE) or (
+                page_path and not page_path.startswith("/doc/")
+            ):
+                SharedState.remove_user(presence_doc, token)
+                break
+            if presence_doc and presence_doc != current_doc_id:
+                SharedState.remove_user(presence_doc, token)
+            presence_doc = current_doc_id
+
             # Keep ephemeral presence tracking server-side.
-            SharedState.update_user(current_doc_id, me)
+            SharedState.update_user(current_doc_id, token, me)
             current_users = SharedState.get_active_users(current_doc_id)
             current_users.sort(key=lambda u: u["name"])
 
@@ -755,6 +883,27 @@ class EditorState(rx.State):
     def toggle_scroll_lock(self):
         """Toggles whether preview scroll follows editor scroll in split view."""
         self.is_scroll_locked = not self.is_scroll_locked
+
+    @rx.event
+    def enter_document(self):
+        """The document page mounted (or, in dev builds, remounted right after unmounting)."""
+        self._left_at = 0.0
+        SharedState.pending_leaves.pop(self.router.session.client_token, None)
+
+    @rx.event
+    def leave_document(self):
+        """The document page unmounted (My Documents, another app page).
+
+        Marks this tab as leaving; the presence loops take it off the document
+        PRESENCE_LEAVE_SETTLE later unless enter_document cancels it first (React
+        StrictMode fires unmount+mount once right after mounting in dev builds).
+        Doing it this way, rather than in the loop of this tab alone, shows the
+        departure to the others even while this tab's state lock is busy with
+        the next page's on_load.
+        """
+        now = time.time()
+        self._left_at = now
+        SharedState.pending_leaves[self.router.session.client_token] = (self.doc_id, now)
 
     @rx.var
     def user_count(self) -> int:

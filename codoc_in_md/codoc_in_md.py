@@ -260,6 +260,9 @@ def index() -> rx.Component:
             class_name="flex flex-col h-screen w-full bg-white",
         ),
         incoming_call(),
+        # Leaving the page (e.g. My Documents) takes us off the document's presence now.
+        on_mount=EditorState.enter_document,
+        on_unmount=EditorState.leave_document,
         class_name="font-['Raleway']",
     )
 
