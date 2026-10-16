@@ -29,7 +29,7 @@ and review Markdown docs in one place.
 ## Getting Started
 
 This project uses [Poetry](https://python-poetry.org/) for dependency management.
-Make sure you have **Python 3.11** and Poetry installed.
+Make sure you have **Python 3.11** (`pyproject.toml` allows 3.11 – 3.15) and Poetry installed.
 
 ### 1) Clone
 

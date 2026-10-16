@@ -6,8 +6,11 @@ authors = []
 packages = [{include = "codoc_in_md"}]
 
 [tool.poetry.dependencies]
-python = "~3.11"
-reflex = "0.8.24.post1"
+# Developed on 3.11 (see AGENTS.md), the Python of the re_ddns App Store image (python:3.11);
+# also installs and runs on 3.15.
+python = ">=3.11,<3.16"
+# DocumentModel is an rx.Model; Reflex 0.10 installs SQLModel, SQLAlchemy and Alembic only with the db extra.
+reflex = {version = "0.10.0", extras = ["db"]}
 reflex-monaco = "*"
 pygments = ">=2.17"
 emoji = ">=2.10.0"

@@ -707,6 +707,14 @@ class EditorState(rx.State):
             self.editor_seed_version += 1
 
     @rx.event
+    def set_sidebar_open(self, value: bool):
+        self.sidebar_open = value
+
+    @rx.event
+    def set_mobile_menu_open(self, value: bool):
+        self.mobile_menu_open = value
+
+    @rx.event
     def toggle_scroll_lock(self):
         """Toggles whether preview scroll follows editor scroll in split view."""
         self.is_scroll_locked = not self.is_scroll_locked

@@ -1,68 +1,82 @@
-from __future__ import annotations
+"""Custom Markdown component tweaks (Reflex 0.10).
 
-"""Custom Markdown component tweaks.
+`CleanMarkdown` is Reflex's Markdown with three changes:
 
-Reflex's built-in Markdown renderer spreads react-markdown element props onto most tags.
-For table-related tags, react-markdown passes internal props (e.g. `isHeader`) that are
-not valid DOM attributes, producing console warnings.
-
-This module provides a small subclass that suppresses those props for table tags,
-while keeping GFM + raw HTML support from Reflex's default Markdown component.
+- It turns on the plugins `rx.markdown` uses (GFM, math + KaTeX, raw HTML, unwrap
+  images). Since Reflex 0.10 they live in rx.markdown's wrapper, not in `Markdown`.
+- Table tags filter the element props react-markdown passes (older versions sent
+  `isHeader`, which is not a DOM attribute) and list tags get none, so the Tailwind
+  classes of the component map stay in charge.
+- A `<pre>` that is not a fenced code block (`<pre><code>`) renders as a plain
+  `<pre>`. Reflex's code-block handler reads the props of a single `<code>` child,
+  but the Pygments HTML from `embeds.apply_hackmd_code_blocks_with_lines` puts
+  `<span>`s straight into `<pre>`, which would crash the whole preview.
 """
 
-from reflex.components.markdown.markdown import Markdown
-from reflex.vars.base import Var
+from __future__ import annotations
+
+import reflex as rx
+from reflex.components.core.markdown_component_map import MarkdownComponentMap
+from reflex.components.markdown.markdown import _CHILDREN, _PROPS, Markdown
+from reflex.vars.base import Var, VarData
+
+_NO_PROPS_TAGS = ("ul", "ol", "li")
+_TABLE_TAGS = ("table", "thead", "tbody", "tr", "th", "td")
+
+# Keep react-markdown's internal `isHeader` off table cells; keep `align`, `colSpan`, etc.
+_FILTERED_TABLE_PROPS = Var(
+    _js_expr="(({ isHeader, ...rest }) => rest)(props)",
+    _var_type=dict,
+)
 
 
 class CleanMarkdown(Markdown):
-    """A Markdown component that avoids passing invalid props to DOM table tags."""
+    """A Markdown component that keeps invalid props off DOM tags and renders raw <pre>."""
 
-    _NO_PROPS_TAGS = (
-        "ul",
-        "ol",
-        "li",
-    )
+    @classmethod
+    def create(cls, *children, **props) -> rx.Component:
+        plugin = rx.markdown.plugin
+        props.setdefault(
+            "remark_plugins",
+            Var.create([plugin.math, plugin.gfm]).to(list[Var | tuple[Var, Var]]),
+        )
+        props.setdefault(
+            "rehype_plugins",
+            Var.create([plugin.katex, plugin.raw, plugin.unwrap_images]).to(
+                list[Var | tuple[Var, Var]]
+            ),
+        )
+        return super().create(*children, **props)
 
-    _TABLE_TAGS = ("table", "thead", "tbody", "tr", "th", "td")
-
-    # react-markdown passes internal props like `isHeader` to table cells.
-    # Filter those out while keeping useful props like `align`, `colSpan`, etc.
-    _FILTERED_MARKDOWN_PROPS = Var(
-        _js_expr="(({ isHeader, ...rest }) => rest)(props)",
-        _var_type=dict,
-    )
-
-    def get_component(self, tag: str, **props):
-        # Import the implementation module to reuse internal helpers/constants.
-        # Use importlib to avoid resolving to a re-exported `markdown` function.
-        import importlib
-
-        md = importlib.import_module("reflex.components.markdown.markdown")
-
-        # Largely mirrors reflex.components.markdown.markdown.Markdown.get_component,
-        # but extends the "no props" list to include table tags.
+    def get_component(self, tag: str, **props) -> rx.Component:
+        # Mirrors Markdown.get_component, with per-tag element props.
         if tag not in self.component_map:
             msg = f"No markdown component found for tag: {tag}."
             raise ValueError(msg)
 
-        special_props = [md._PROPS]
-        children = [
-            md._CHILDREN
-            if tag != "codeblock"
-            else md.ternary_operation(
-                md.ARRAY_ISARRAY.call(md._CHILDREN),
-                md._CHILDREN.to(list).join("\n"),
-                md._CHILDREN,
-            ).to(str)
-        ]
-
-        if tag in self._NO_PROPS_TAGS:
+        if tag in _NO_PROPS_TAGS:
             special_props = []
-        elif tag in self._TABLE_TAGS:
-            special_props = [self._FILTERED_MARKDOWN_PROPS]
+        elif tag in _TABLE_TAGS:
+            special_props = [_FILTERED_TABLE_PROPS]
+        else:
+            special_props = [_PROPS]
 
-        children_prop = props.get("children")
-        if children_prop is not None:
-            children = []
-
+        children = [_CHILDREN] if props.get("children") is None else []
         return self.component_map[tag](*children, **props).set(special_props=special_props)
+
+    def format_component_map(self) -> dict[str, Var]:
+        components = super().format_component_map()
+        code_block = components["pre"]
+        plain_pre = MarkdownComponentMap.create_map_fn_var(
+            fn_body=Var(_js_expr=f"({rx.el.pre(_CHILDREN).set(special_props=[_PROPS])!s})"),
+        )
+        components["pre"] = Var(
+            _js_expr=(
+                "((args) => (args.children?.props?.node?.tagName === 'code'"
+                f" ? ({code_block!s})(args) : ({plain_pre!s})(args)))"
+            ),
+            _var_data=VarData.merge(
+                code_block._get_all_var_data(), plain_pre._get_all_var_data()
+            ),
+        )
+        return components

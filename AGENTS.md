@@ -15,6 +15,8 @@ If you already read them earlier in the session, **re-check** when unsure.
 
 This project targets **Python 3.11**. **Don't create the virtual environment of Python 3.14**
 
+`pyproject.toml` allows 3.11 – 3.15 (Reflex 0.10); 3.11 is also the Python of the re_ddns App Store image, so keep the range covering it.
+
 - Prefer Poetry-managed environments.
 - If Poetry selected another Python (e.g. 3.12+), switch it:
 

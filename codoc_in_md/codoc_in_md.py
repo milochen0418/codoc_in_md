@@ -262,7 +262,6 @@ def index() -> rx.Component:
 
 
 app = rx.App(
-    theme=rx.theme(appearance="light"),
     head_components=[
         rx.el.script(
             f"window.CODOC_BACKEND_BASE_URL = '{embeds._backend_base_url()}'"
