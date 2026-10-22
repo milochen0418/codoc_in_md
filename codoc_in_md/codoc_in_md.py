@@ -223,9 +223,12 @@ def content_area() -> rx.Component:
                 class_name="grid flex-1 overflow-hidden h-full w-full relative min-h-0",
             ),
             rx.el.div(
-                rx.cond(
-                    EditorState.view_mode != "preview",
-                    rx.el.div(editor_panel(), id="editor-pane", class_name="w-full h-full"),
+                # Hidden, not removed, in Preview: the others' edits reach the
+                # preview through the editor (Yjs -> Monaco -> update_content).
+                rx.el.div(
+                    editor_panel(),
+                    id="editor-pane",
+                    class_name=rx.cond(EditorState.view_mode == "preview", "hidden", "w-full h-full"),
                 ),
                 rx.cond(
                     EditorState.view_mode != "editor",
