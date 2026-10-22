@@ -2,15 +2,26 @@ import re as _re
 import reflex as rx
 import sqlmodel
 import asyncio
+import atexit
+import os
+import sys
+import threading
 import time
 import random
 import uuid
 import zlib
 import logging
+from datetime import datetime
 from typing import TypedDict, Optional
 from pathlib import Path
 
 from .call import CallState
+
+try:  # on re_ddns: the documents as items of a shared collection (_ItemDocumentStore)
+    from reflex_ddns_auth.collections import Collection, ItemNotFound
+    from reflex_ddns_auth.collections.refs import valid_item_id
+except ImportError:
+    Collection = ItemNotFound = valid_item_id = None
 
 from .embeds import (
     apply_hackmd_mathjax_delimiters,
@@ -342,7 +353,186 @@ class _DocumentStore:
             session.commit()
 
 
-DOCUMENTS_STORE = _DocumentStore()
+logger = logging.getLogger(__name__)
+
+# The App Store gives the app this collection (its catalog entry declares it, and the install
+# sets DDNS_COLLECTIONS_ROOT); every document is then an item of it, of this kind.
+COLLECTION = "documents"
+KIND = "document.markdown"
+DOC_FILE = "doc.md"
+# A saved change reaches the collection this many seconds later, so typing writes a document
+# at most once per SAVE_DELAY.
+SAVE_DELAY = 1.5
+
+
+class _ItemDocumentStore:
+    """The documents as items of a shared collection (re_ddns's Owned Collections).
+
+    Document ``<doc_id>`` is the item ``documents:<app>/<doc_id>``, a folder holding
+    ``doc.md``, with the title and the creator in its manifest. Every app given the
+    collection can read the documents, and the App Store's storage page lists them.
+
+    Same interface as :class:`_DocumentStore`, and as fast while people type: a save
+    keeps the document in memory, and a background thread writes it SAVE_DELAY seconds
+    later (published the first time, revised in place after that). Whatever is still
+    unwritten at exit is written then.
+    """
+
+    def __init__(self, items):
+        self.items = items
+        self._lock = threading.Lock()  # guards _pending and _timer
+        self._write_lock = threading.Lock()  # one write or delete at a time
+        # Saved, not written yet: readers get these until they are on disk.
+        self._pending: dict[str, Document] = {}
+        self._timer: Optional[threading.Timer] = None
+        atexit.register(self.flush)
+
+    def _item(self, doc_id: str):
+        """The document's item in our own folder (not a copy from another host), or None."""
+        if not valid_item_id(doc_id):
+            return None
+        item = self.items.get(self.items.ref(doc_id), remote=False)
+        return item if item is not None and item.kind == KIND and not item.replica else None
+
+    @staticmethod
+    def _to_document(item) -> Optional[Document]:
+        try:
+            # Decoded from bytes: reading it as text would turn \r\n into \n.
+            content = item.primary.read_bytes().decode("utf-8") if item.primary else ""
+        except (OSError, UnicodeDecodeError):
+            return None
+        meta = item.meta
+        return Document(
+            doc_id=item.id,
+            title=item.title or _extract_title(content),
+            content=content,
+            updated_at=_timestamp(item.updated_at),
+            version=item.revision,
+            created_by_email=str(meta.get("created_by_email") or ""),
+            created_by_name=str(meta.get("created_by_name") or ""),
+        )
+
+    def get(self, doc_id: str) -> Optional[Document]:
+        with self._lock:
+            doc = self._pending.get(doc_id)
+        if doc is not None:
+            return Document(**doc)
+        item = self._item(doc_id)
+        return self._to_document(item) if item is not None else None
+
+    def __contains__(self, doc_id: str) -> bool:
+        with self._lock:
+            if doc_id in self._pending:
+                return True
+        return self._item(doc_id) is not None
+
+    def __getitem__(self, doc_id: str) -> Document:
+        doc = self.get(doc_id)
+        if doc is None:
+            raise KeyError(doc_id)
+        return doc
+
+    def __setitem__(self, doc_id: str, doc: Document):
+        doc = Document(**doc)
+        doc["title"] = doc.get("title") or _extract_title(doc.get("content", ""))
+        with self._lock:
+            if doc_id not in self._pending and not valid_item_id(doc_id):
+                logger.warning("Document id %r can't name an item; it is kept in memory only", doc_id)
+            self._pending[doc_id] = doc
+            if self._timer is None:
+                self._timer = threading.Timer(SAVE_DELAY, self.flush)
+                self._timer.daemon = True
+                self._timer.start()
+
+    def __delitem__(self, doc_id: str):
+        with self._write_lock:
+            with self._lock:
+                self._pending.pop(doc_id, None)
+            if valid_item_id(doc_id):
+                self.items.remove(doc_id)
+
+    def values(self) -> list[Document]:
+        """Return all documents, most-recently-updated first."""
+        with self._lock:
+            docs = {doc_id: Document(**doc) for doc_id, doc in self._pending.items()}
+        # Copies fetched from another host are that host's documents, not ours.
+        for item in self.items.items(kind=KIND, remote=False):
+            if item.owner == self.items.app_id and not item.replica and item.id not in docs:
+                doc = self._to_document(item)
+                if doc is not None:
+                    docs[item.id] = doc
+        return sorted(docs.values(), key=lambda d: d["updated_at"], reverse=True)
+
+    def clear(self):
+        """Delete every document (useful for testing)."""
+        for doc in self.values():
+            del self[doc["doc_id"]]
+
+    def flush(self) -> None:
+        """Writes the documents saved since they were last written (on the timer, and at exit)."""
+        with self._lock:
+            self._timer = None
+            doc_ids = list(self._pending)
+        for doc_id in doc_ids:
+            if not valid_item_id(doc_id):
+                continue
+            with self._write_lock:
+                with self._lock:
+                    doc = self._pending.get(doc_id)
+                if doc is None:
+                    continue  # deleted meanwhile
+                try:
+                    self._write(doc_id, doc)
+                except Exception as exc:  # kept in memory; the next save tries again
+                    logger.warning("Could not write document %s to the collection: %s", doc_id, exc)
+                    continue
+                with self._lock:
+                    # Saved again meanwhile: that one is written next time.
+                    if self._pending.get(doc_id) is doc:
+                        del self._pending[doc_id]
+
+    def _write(self, doc_id: str, doc: Document) -> None:
+        """Revises the document's item, or publishes one when there is none: a new document,
+        or one deleted on the storage page while people were still writing in it (saving
+        creates it again, as the database does)."""
+        data = (doc.get("content") or "").encode("utf-8")
+        fields = dict(
+            title=doc["title"],
+            meta={
+                "created_by_email": doc.get("created_by_email", ""),
+                "created_by_name": doc.get("created_by_name", ""),
+            },
+        )
+        try:
+            with self.items.revise(doc_id, **fields) as rev:
+                with rev.open(DOC_FILE) as fh:
+                    fh.write(data)
+            return
+        except ItemNotFound:
+            pass
+        with self.items.publish(doc_id, kind=KIND, primary=DOC_FILE, **fields) as item:
+            with item.open(DOC_FILE) as fh:
+                fh.write(data)
+
+
+def _timestamp(iso: str) -> float:
+    try:
+        return datetime.fromisoformat(iso).timestamp()
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _make_store():
+    """The documents as items of the shared collection when re_ddns gave the app one, else in
+    the database (``db_url`` in rxconfig.py)."""
+    if os.environ.get("DDNS_COLLECTIONS_ROOT") and Collection is not None:
+        if hasattr(Collection, "revise"):
+            return _ItemDocumentStore(Collection(COLLECTION))
+        print("CoDoc: this reflex_ddns_auth can't revise items; documents stay in the database", file=sys.stderr)
+    return _DocumentStore()
+
+
+DOCUMENTS_STORE = _make_store()
 
 
 # Presence and cursor colors: distinct, visible as a caret on the white editor,

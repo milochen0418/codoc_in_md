@@ -129,6 +129,20 @@ Artifacts (screenshots/logs) are written to `testcases/<suite_name>/output/`.
      - Other dialogs (e.g. a Relack profile), the **–** button or a click outside minimize the call to a
        tray at the bottom left; it keeps running. Hang up, or close it from the tray, to leave.
 
+## Where documents are saved
+
+- **Run on its own** (e.g. `poetry run ./reflex_rerun.sh`): in the app's SQLite database (`db_url` in
+  `rxconfig.py`), saved as you type.
+- **Installed from the re_ddns App Store** (dev or normal install): each document is a Markdown file in the
+  shared collection `documents` instead, `documents/by-app/md/<doc id>/doc.md` under the host's collections
+  folder (`/Users/Shared/re-ddns/collections` by default). Editing together works as before (it goes through
+  the Yjs relay); a change is written to the file 1.5 s after it is made, and whatever is unwritten when the
+  app stops is written then. Documents therefore survive reinstalling the app, the App Store's **Storage**
+  page lists them, and other apps given the collection can read them.
+
+Which one is used follows `DDNS_COLLECTIONS_ROOT`, which re_ddns sets for apps that declare storage. A unit
+test covers the collection store: `poetry run pytest tests`.
+
 ## Calls
 
 The call runs in a separate call app, opened in a dialog through the DDNS Intent `call.join`
