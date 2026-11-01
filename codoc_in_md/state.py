@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import TypedDict, Optional
 from pathlib import Path
 
+from . import ai_edits
 from .call import CallState
 
 try:  # on re_ddns: the documents as items of a shared collection (_ItemDocumentStore)
@@ -571,6 +572,14 @@ class DisplayUser(TypedDict):
     avatar_url: str
 
 
+class AiNote(TypedDict):
+    """A change the AI made to the document, on the note that can take it back."""
+
+    id: str
+    who: str
+    summary: str
+
+
 class DocListItem(TypedDict):
     doc_id: str
     title: str
@@ -614,6 +623,8 @@ PRESENCE_COLOR_MEMORY = 60
 # A page unmount followed by a mount within this long is a dev-build (React
 # StrictMode) remount, not a departure.
 PRESENCE_LEAVE_SETTLE = 0.5
+# How many of the AI's latest changes show as notes on the document.
+AI_NOTES_SHOWN = 3
 
 
 def _client_connected(token: str) -> bool:
@@ -753,6 +764,10 @@ class EditorState(rx.State):
 
     # Mobile header menu
     mobile_menu_open: bool = False
+
+    # What the AI changed in this document lately, minus the notes this tab dismissed.
+    ai_notes: list[AiNote] = []
+    _ai_notes_closed: list[str] = []
 
     # Split-view behavior.
     # When locked, the preview scroll follows the editor scroll (HackMD-like).
@@ -1024,6 +1039,13 @@ class EditorState(rx.State):
                     self.users = display_users
                 if my_doc_color != self.my_doc_color:
                     self.my_doc_color = my_doc_color
+                notes: list[AiNote] = [
+                    {"id": c.id, "who": c.who, "summary": c.summary}
+                    for c in ai_edits.recent(current_doc_id)
+                    if c.id not in self._ai_notes_closed
+                ][:AI_NOTES_SHOWN]
+                if notes != self.ai_notes:
+                    self.ai_notes = notes
                 # The document's call: how many are in it, whether it rings us.
                 calls = await self.get_state(CallState)
                 calls._refresh(current_doc_id, self.my_user_id)
@@ -1054,6 +1076,11 @@ class EditorState(rx.State):
         if not code.startswith("{%grid "):
             return None
         return rx.call_script(f"window.codocInsertBlock && window.codocInsertBlock({json.dumps(code)})")
+
+    @rx.event
+    def close_ai_note(self, change_id: str):
+        self._ai_notes_closed = [*self._ai_notes_closed[-20:], change_id]
+        self.ai_notes = [n for n in self.ai_notes if n["id"] != change_id]
 
     @rx.event
     def export_markdown(self):

@@ -1,5 +1,6 @@
 import reflex as rx
 from codoc_in_md.state import EditorState
+from codoc_in_md.components.ai_views import ai_dropdown, mobile_ai_items
 from codoc_in_md.components.call_views import call_button, mobile_call_item
 
 try:
@@ -162,8 +163,8 @@ def _dropdown_item_cls() -> str:
 
 def _header_btn_cls() -> str:
     return (
-        "flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 "
-        "hover:bg-gray-100 rounded-lg transition-colors cursor-pointer"
+        "flex items-center gap-1 px-2 py-1.5 text-sm font-medium text-gray-700 "
+        "hover:bg-gray-100 rounded-lg transition-colors cursor-pointer whitespace-nowrap"
     )
 
 
@@ -186,8 +187,10 @@ def document_dropdown() -> rx.Component:
     return rx.el.div(
         rx.el.button(
             rx.icon("file-text", class_name="h-4 w-4"),
-            "Document",
+            rx.el.span("Document", class_name="hidden lg:inline"),
             rx.icon("chevron-down", class_name="h-3 w-3 opacity-50"),
+            title="Document",
+            aria_label="Document",
             class_name=_header_btn_cls(),
         ),
         rx.el.div(
@@ -218,8 +221,10 @@ def export_dropdown() -> rx.Component:
     return rx.el.div(
         rx.el.button(
             rx.icon("download", class_name="h-4 w-4"),
-            "Export",
+            rx.el.span("Export", class_name="hidden lg:inline"),
             rx.icon("chevron-down", class_name="h-3 w-3 opacity-50"),
+            title="Export",
+            aria_label="Export",
             class_name=_header_btn_cls(),
         ),
         rx.el.div(
@@ -293,7 +298,7 @@ def user_identity() -> rx.Component:
         ),
         rx.el.span(
             AuthState.user_name,
-            class_name="text-sm font-medium text-gray-700 max-w-[120px] truncate",
+            class_name="text-sm font-medium text-gray-700 max-w-[72px] 2xl:max-w-[120px] truncate",
         ),
         rx.el.a(
             "Logout",
@@ -444,6 +449,7 @@ def mobile_menu_panel() -> rx.Component:
             # Other actions
             rx.el.div(
                 mobile_call_item(_mobile_menu_item_cls(), EditorState.set_mobile_menu_open(False)),
+                *mobile_ai_items(_mobile_menu_item_cls(), EditorState.set_mobile_menu_open(False)),
                 rx.el.button(
                     rx.icon("share-2", class_name="h-4 w-4"),
                     "Share Link",
@@ -488,10 +494,13 @@ def header() -> rx.Component:
                 ),
                 rx.el.div(
                     rx.el.h1(
-                        "Collaborative Doc", class_name="text-xl font-bold text-gray-900 hidden sm:block"
+                        "Collaborative Doc",
+                        class_name="text-xl font-bold text-gray-900 hidden min-[1440px]:block whitespace-nowrap",
                     ),
                     rx.el.h1(
-                        "CoDoc", class_name="text-lg font-bold text-gray-900 sm:hidden"
+                        "CoDoc",
+                        aria_label="Collaborative Doc",
+                        class_name="text-lg font-bold text-gray-900 min-[1440px]:hidden",
                     ),
                     rx.el.div(
                         rx.cond(
@@ -513,25 +522,31 @@ def header() -> rx.Component:
                 rx.el.div(
                     rx.el.div(
                         rx.foreach(EditorState.users, user_avatar),
-                        class_name="flex -space-x-2 mr-4",
+                        class_name="flex -space-x-2 mr-2",
                     ),
                     call_button(),
+                    ai_dropdown(_dropdown_item_cls(), _header_btn_cls(), _dropdown_menu_cls(), _dropdown_inner_cls()),
                     document_dropdown(),
                     export_dropdown(),
+                    # The words go first when the header runs out of room, so that it stays one line.
                     rx.el.button(
                         rx.icon("share-2", class_name="h-4 w-4"),
-                        "Share Link",
+                        rx.el.span("Share Link", class_name="hidden xl:inline"),
                         on_click=[
                             rx.call_script("navigator.clipboard.writeText(window.location.href)"),
                             rx.toast.success("Link copied to clipboard!", duration=3000, position="bottom-right"),
                         ],
-                        class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors cursor-pointer active:scale-95",
+                        title="Share Link",
+                        aria_label="Share Link",
+                        class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition-colors cursor-pointer active:scale-95 whitespace-nowrap",
                     ),
                     rx.el.a(
                         rx.icon("folder-open", class_name="h-4 w-4"),
-                        "My Documents",
+                        rx.el.span("My Documents", class_name="hidden 2xl:inline"),
                         href="/",
-                        class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer",
+                        title="My Documents",
+                        aria_label="My Documents",
+                        class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer whitespace-nowrap",
                     ),
                     rx.el.div(class_name="w-px h-6 bg-gray-200"),
                     user_identity(),

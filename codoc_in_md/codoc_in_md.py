@@ -7,9 +7,10 @@ from codoc_in_md.components.header import header
 from codoc_in_md.components.sidebar import sidebar
 from codoc_in_md.components.markdown_clean import CleanMarkdown
 from codoc_in_md.components.doc_list import doc_list_page
+from codoc_in_md.components.ai_views import ai_change_bar, ai_writer
 from codoc_in_md.components.call_views import call_keepalive, incoming_call
 
-from codoc_in_md import embeds
+from codoc_in_md import ai, embeds
 from codoc_in_md.embeds import register_backend_embed_routes
 from codoc_in_md.export_pdf import register_pdf_export_routes
 from codoc_in_md.link_preview import register_link_preview_routes
@@ -263,6 +264,8 @@ def index() -> rx.Component:
             class_name="flex flex-col h-screen w-full bg-white",
         ),
         incoming_call(),
+        ai_writer(),
+        ai_change_bar(),
         # Leaving the page (e.g. My Documents) takes us off the document's presence now.
         on_mount=EditorState.enter_document,
         on_unmount=EditorState.leave_document,
@@ -281,6 +284,7 @@ app = rx.App(
         rx.el.script(src="/export_pdf.js", defer=True),
         rx.el.script(src="/yjs_collab.js", defer=True),
         rx.el.script(src="/embed_frames.js", defer=True),
+        rx.el.script(src="/ai_writer.js", defer=True),
         # HackMD commonly uses Font Awesome 4 markup like: <i class="fa fa-...">.
         # Load FA so those icons render in the preview.
         rx.el.link(
@@ -324,3 +328,12 @@ register_pdf_export_routes(app)
 register_link_preview_routes(app)
 # Yjs CRDT WebSocket relay for real-time collaboration.
 register_yjs_routes(app)
+
+# On re_ddns with an AI Hub: the hub's assistant may read and change documents (ai_tools), and the
+# hub's page says what the editor asks its models for.
+try:
+    from codoc_in_md import ai_tools
+    ai_tools.register(app)
+    ai.declare(app)
+except ImportError:
+    pass

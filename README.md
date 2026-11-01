@@ -27,6 +27,7 @@ and review Markdown docs in one place.
 - **Remote cursors (HackMD-style)**: Everyone's caret and selection show in the editor in their own color (while they are in the editor), with a
     name tag that appears while they type or move and when you hover their caret.
 - **ReflexGrid in a document**: A workbook's cells, read only and live, and its Excel UserForms, working, right in the preview.
+- **AI through the AI Hub**: Ask about a document or have the AI write in it, rewrite or translate what you select, or talk with it: see [AI](#ai).
 - **Presence indicators**: Shows who is on the document. Each avatar is ringed in the color of that person's cursor,
     and no two people on a document share a color.
 
@@ -173,6 +174,43 @@ Settings, for local development (on re-ddns there is nothing to configure):
 
 E2E suite (a stand-in for ReflexGrid runs inside it): `DDNS_INTENT_URL_GRID=http://127.0.0.1:8398 poetry run ./run_test_suite.sh grid_embed`
 
+## AI
+
+On re_ddns with the [AI Hub](https://github.com/milochen0418/ai_hub) installed, the header has an **AI** menu. The app
+holds no model, key or address of its own: the hub chooses the models, and without a hub the menu isn't there.
+
+- **Assistant** (Alt+A) opens the hub's assistant on this document. It reads what you select, answers from the document,
+  and writes in it: every change waits for your **Accept** in the chat.
+- **Rewrite** (Cmd/Ctrl+I, or the **✦ AI** button on a selection) works on the selection: your own words, or Improve, Fix
+  mistakes, Shorter, Longer, To English, To 繁體中文, Sum up, To a table. With nothing selected it writes at the caret.
+  You see the answer before anything changes; **Replace** or **Insert below** puts it in as your own edit, so Ctrl+Z
+  takes it back. Which model answers is set on the hub's page, on this app's line (the role `fast`).
+- **Talk** calls up the hub's talking AI. It can read the document; changing it takes the assistant.
+
+The assistant works like one more person on the document: it shows among the people there, what it wrote stays marked
+in its color for a moment, and its change merges with what the others type at that moment. Ctrl+Z doesn't reach it (to
+the editor it is someone else's edit), so a note at the bottom left, for everyone on the document, takes it back with
+**Undo** for 30 minutes, unless people wrote over that text since.
+
+`codoc_in_md/ai_tools.py` holds the tools the hub offers its AI (`md.read`, `md.edit`, `md.append`, `md.rewrite`, `md.create`,
+`md.list_documents`) and `md.guide`, which tells the AI this editor's Markdown. `/yjs` stays a plain relay, and the text
+stays in the browsers: to make a change the server joins the room for a moment (`yjs_ws.Visitor`), gets the text from the
+tabs and sends its change to them. With no tab open the change goes straight into the saved document.
+
+Settings, for local development (on re-ddns there is nothing to configure):
+
+- `DDNS_AI_HUB_URL`: where the hub's backend is, with the same `DDNS_AUTH_SECRET`. The menu needs this or `RE_DDNS_API_URL`.
+- `DDNS_INTENT_URL_AI`: where its pages are, and `DDNS_INTENT_PROVIDER_AI_ASSIST=ai`, `DDNS_INTENT_PROVIDER_AI_TALK=ai`: the
+  app that provides the assistant and the talking AI, when there is no registry.
+
+E2E suite (a stand-in for the hub runs inside it):
+
+```bash
+DDNS_AI_HUB_URL=http://127.0.0.1:8397 DDNS_INTENT_URL_AI=http://127.0.0.1:8397 DDNS_INTENT_PROVIDER_AI_ASSIST=ai \
+DDNS_INTENT_PROVIDER_AI_TALK=ai DDNS_INTENT_TRUST_LOCALHOST=1 DDNS_AUTH_SECRET=<32 characters or more> \
+poetry run ./run_test_suite.sh ai_assist
+```
+
 ## Calls
 
 The call runs in a separate call app, opened in a dialog through the DDNS Intent `call.join`
@@ -212,4 +250,5 @@ DDNS_INTENT_URL_LIVEKIT_ALT=http://127.0.0.1:3200 poetry run ./run_test_suite.sh
 - **Reflex**: Full-stack Python web framework
 - **reflex-monaco**: Monaco Editor integration
 - **Pygments**: Server-side syntax highlighting (used for HackMD-style code fences)
+- **pycrdt**: The server's copy of a document's Yjs text for a moment, when the AI changes it
 - **Python 3.11**

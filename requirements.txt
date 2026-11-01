@@ -6,3 +6,4 @@ emoji>=2.10.0
 markdown>=3.6
 weasyprint>=62.0
 pydyf==0.11.0
+pycrdt>=0.14

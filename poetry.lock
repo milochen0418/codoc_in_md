@@ -1254,6 +1254,92 @@ files = [
 ]
 
 [[package]]
+name = "pycrdt"
+version = "0.14.9"
+description = "Python bindings for Yrs"
+optional = false
+python-versions = ">=3.11"
+groups = ["main"]
+files = [
+    {file = "pycrdt-0.14.9-cp311-cp311-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:11c2d5c68b8dd86f537928dda273df7bb5e299517e167915ff88e85ac8c7b677"},
+    {file = "pycrdt-0.14.9-cp311-cp311-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d0ca9c668260788abacd219bb042fd4f346e6a957b6f469208e4bb923b74b8c7"},
+    {file = "pycrdt-0.14.9-cp311-cp311-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:5c04f56688960ec74efbb843deff4b731535b587c5777632478f322b6b6e38eb"},
+    {file = "pycrdt-0.14.9-cp311-cp311-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:ddca4de057e82be8d315a00cc46716e5bd807327a44b944dc3110acbf3163f55"},
+    {file = "pycrdt-0.14.9-cp311-cp311-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:6aa477cb69b3bed0193f3e140a475edc65f85e5b5e079cf4575d8dee4de79384"},
+    {file = "pycrdt-0.14.9-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6f465b92533d9b9974e57610c0c91c672812ec0651ed3a9890f21e43f21b44d1"},
+    {file = "pycrdt-0.14.9-cp311-cp311-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:b3034311c02b324756039ae3db4bcf0f2e1981126eeb483366d2f2807305fa7a"},
+    {file = "pycrdt-0.14.9-cp311-cp311-musllinux_1_2_aarch64.whl", hash = "sha256:f5480013bb936c8273a824736143949789e4512beeebccea48808df8c22f548f"},
+    {file = "pycrdt-0.14.9-cp311-cp311-musllinux_1_2_armv7l.whl", hash = "sha256:932f81712781ac27882fbcb30d278c47600039315dbece51445b437a09511093"},
+    {file = "pycrdt-0.14.9-cp311-cp311-musllinux_1_2_i686.whl", hash = "sha256:f237bd39c4b513e9f2f33731576b40609a7fdf6007c66a70a9083213c7169de7"},
+    {file = "pycrdt-0.14.9-cp311-cp311-musllinux_1_2_x86_64.whl", hash = "sha256:188a904664e8e75eb79382da8e6b97bfd03e07fb6c2d64b77fa1e5933eed89f4"},
+    {file = "pycrdt-0.14.9-cp311-cp311-win32.whl", hash = "sha256:4df191f7768588848e04f30ad3cd266e1cbf93e44a738f3c54e784aa98644093"},
+    {file = "pycrdt-0.14.9-cp311-cp311-win_amd64.whl", hash = "sha256:f334f54fefb7f2e4e9869c0e6c4210c2f72765cd9be858911958e675f68d5cbd"},
+    {file = "pycrdt-0.14.9-cp312-cp312-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:197eafcdeef1e38ad5a5e2c80d50b2b0b1795572cc497244ffed55ab2d250148"},
+    {file = "pycrdt-0.14.9-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:15b3756e9b54a2d525473c67550259747ca543750391da22b22cd096c35192e3"},
+    {file = "pycrdt-0.14.9-cp312-cp312-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:227dc9d0302c7a720338b4136d7b204f5e70b925c04c2e625aaddd46351a394a"},
+    {file = "pycrdt-0.14.9-cp312-cp312-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:a792ea23644ac49a8ab78573d09279f8e525c61ff92eb767c26db91ad5456d8c"},
+    {file = "pycrdt-0.14.9-cp312-cp312-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:b86b91090fe08731c7b09a2a08eb0cbb2b31cc0f9b8a9c7326195e004355940b"},
+    {file = "pycrdt-0.14.9-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:3d310d3c301461f82f16bc9664c29b2d012442444b3715d64a865fcec8d3b933"},
+    {file = "pycrdt-0.14.9-cp312-cp312-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:434d9a52a59765a42cb881c5b9e475f0bed1d88613e4ef4c8d387cd455c3fe5c"},
+    {file = "pycrdt-0.14.9-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:cac5c7a3ce0cf1f772b463e0ef1366a6a79147c7c4f0b334f15771cc33635f84"},
+    {file = "pycrdt-0.14.9-cp312-cp312-musllinux_1_2_armv7l.whl", hash = "sha256:7c64e0990f63f36929f101721f2f64a3593da32c7c01ff149ffba4d1ab553101"},
+    {file = "pycrdt-0.14.9-cp312-cp312-musllinux_1_2_i686.whl", hash = "sha256:c010d5bc527b93a112dd99ed7556497da1cc9b31514ddfc381549dd58b930a94"},
+    {file = "pycrdt-0.14.9-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:1ec7c45b17f32a5b64df8112c0601704545fa31a84d69abb8c87f1ce47602422"},
+    {file = "pycrdt-0.14.9-cp312-cp312-win32.whl", hash = "sha256:20b6afcf41fd88bcba9e4b920685fd4d5e3feb342488eaf4b6056273485ce962"},
+    {file = "pycrdt-0.14.9-cp312-cp312-win_amd64.whl", hash = "sha256:d7770ed074cd168b2e807c23e8cea343daf3ad2dd47d8b3f7213be75e70f4b1d"},
+    {file = "pycrdt-0.14.9-cp313-cp313-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:3a58b987da4cd9a0ec3f14cac432eadfec1a91829e2f7bcb1b9c5840c2a422be"},
+    {file = "pycrdt-0.14.9-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:317d0e0ce4ca96853d872ce6664f51f20798b5135e20145e199f3360b2f75e82"},
+    {file = "pycrdt-0.14.9-cp313-cp313-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:ef715e1007b3bcc66e0a6b5fd3372efb41879410cdad7b860bfbd2815a0209b7"},
+    {file = "pycrdt-0.14.9-cp313-cp313-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:5246cff391d1e9db84fcc99cd4660f28113d3635973714819c986dc65e569ca0"},
+    {file = "pycrdt-0.14.9-cp313-cp313-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:2e51609807281b06a09da503a70e5217c2bbc9afff184868a8dd950c5d2fc413"},
+    {file = "pycrdt-0.14.9-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:e4144ea23752d540bc728bed40ac0ad4f47f262975bcb9123501e9b44359c447"},
+    {file = "pycrdt-0.14.9-cp313-cp313-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:42ef1e8f53220c7f5b26f54dddc042b9e8256874c1757ec31f713547f0b251ba"},
+    {file = "pycrdt-0.14.9-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:c2a7310f543234473e1cfc64ef338b8370cfe17ef74d3544d5c2d081340610b0"},
+    {file = "pycrdt-0.14.9-cp313-cp313-musllinux_1_2_armv7l.whl", hash = "sha256:11f0ed0c05fdec6dd171715e58257e5868369874034b250f64256a6d897296e8"},
+    {file = "pycrdt-0.14.9-cp313-cp313-musllinux_1_2_i686.whl", hash = "sha256:44cd798322365f5232a93e3cce009dd43bed541934d6448996d3b4af9c105c7a"},
+    {file = "pycrdt-0.14.9-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:84a00dc0e3b2527bb9b472a5f39c0fc86bab6f9d673614e5444717187597ecaa"},
+    {file = "pycrdt-0.14.9-cp313-cp313-win32.whl", hash = "sha256:da6cf11b8ab8f674bb70d50bafecca4f81ba6f8146026b7fe75058549d953244"},
+    {file = "pycrdt-0.14.9-cp313-cp313-win_amd64.whl", hash = "sha256:40ea2ad9992f859549897eef6daeb88b69b4c1a5a901d661a685b70fd1415415"},
+    {file = "pycrdt-0.14.9-cp314-cp314-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:b1d0d3efdaddd769b13a289ce4713ab5a409746ec97610ef7d772737d996055e"},
+    {file = "pycrdt-0.14.9-cp314-cp314-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ec4ada9c26e46aa3efd2a9499edb9f627aa30cdf88b11b56964556a17b227e23"},
+    {file = "pycrdt-0.14.9-cp314-cp314-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:3ed782250618be8693f6d8b93180541028688332f4ede5a7a2511cb24f510edf"},
+    {file = "pycrdt-0.14.9-cp314-cp314-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:2259f88b586d1900a50abdfaa581f9c6964b7a84442235060f64f9a67f0b088b"},
+    {file = "pycrdt-0.14.9-cp314-cp314-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:ee35122f3354cb8d8598467a69514d153df3688639a7d390d0bfecf6ff7ce392"},
+    {file = "pycrdt-0.14.9-cp314-cp314-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c02c02b5e5dffc4f964aca74d0c042bbb849fa6e8b11c18bf395d9688f4a1a9d"},
+    {file = "pycrdt-0.14.9-cp314-cp314-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:523c2706534c412cbad4d5563ede4146c8b890ef721070059f0746c5467f4d94"},
+    {file = "pycrdt-0.14.9-cp314-cp314-musllinux_1_2_aarch64.whl", hash = "sha256:38b363fd5ecf61bcede709297c0525404b3c08eb2c85e16200cda86b33fd960d"},
+    {file = "pycrdt-0.14.9-cp314-cp314-musllinux_1_2_armv7l.whl", hash = "sha256:60023b7360154ed354390778d6ae5d5c81d3bbaed75abb323f6e0185b781641f"},
+    {file = "pycrdt-0.14.9-cp314-cp314-musllinux_1_2_i686.whl", hash = "sha256:d49f3a582c89e6aefaedc8e7ef635f9c0bd6b1d3768da14891905511eb7c411f"},
+    {file = "pycrdt-0.14.9-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:8d1f9d5918f4254740c08bb8239ab6b3e273d99f8c8e25dd93f77c96cd988778"},
+    {file = "pycrdt-0.14.9-cp314-cp314-win32.whl", hash = "sha256:100a2725ceb1865d68af6c49e0c82c85e507c66849e4c714934b5799206d085e"},
+    {file = "pycrdt-0.14.9-cp314-cp314-win_amd64.whl", hash = "sha256:cd5b2bbd1dce8ce0395fde77ce47f5bb8dd5edb33f8850395108f64494ec268b"},
+    {file = "pycrdt-0.14.9-cp315-cp315-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:a69562f1c750387eed69a30ca53228542ce48eee4491b0875630a90bf31cc44b"},
+    {file = "pycrdt-0.14.9-cp315-cp315-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:b382e8a2b3e21aa7c97430751bfa6f40d7f4fbf65b28c19264460752e0cd5972"},
+    {file = "pycrdt-0.14.9-cp315-cp315-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:7560df6b02b7cb816212e59196f3b028f9a13f3bb81491246fd27c401edab93a"},
+    {file = "pycrdt-0.14.9-cp315-cp315-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:14d31f25265039fa6f672bc987c3463aac1120b8d7737bea4d785c5aba171fd1"},
+    {file = "pycrdt-0.14.9-cp315-cp315-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:0807789477eeec001eeb04bbcd0ece741205f9a697a1752c279227347033622e"},
+    {file = "pycrdt-0.14.9-cp315-cp315-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:b798d1e34a97550c674c42f123ea74b7731d01520c7b21c9d0234d90b28e4306"},
+    {file = "pycrdt-0.14.9-cp315-cp315-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:9ac24d6ce3ac09aa224d9d3ad020ccd1d188dc8dd2c730f2af3ab5458a351433"},
+    {file = "pycrdt-0.14.9-cp315-cp315-musllinux_1_2_aarch64.whl", hash = "sha256:38dc65141b278a165565251507b665b8f63de65e6b29847dd6483be646cfb41a"},
+    {file = "pycrdt-0.14.9-cp315-cp315-musllinux_1_2_armv7l.whl", hash = "sha256:ff84a15980a6bd53f57a216d4baea586b0fb34c0f021a1daa5db2e92d1730913"},
+    {file = "pycrdt-0.14.9-cp315-cp315-musllinux_1_2_i686.whl", hash = "sha256:6b3546f0190baeb185235c635ee40217fb13d8d621d551382085816e6e5ea779"},
+    {file = "pycrdt-0.14.9-cp315-cp315-musllinux_1_2_x86_64.whl", hash = "sha256:37dc9f2f77b29c65615b33bcd3f3502b680b6a5ca08fc4b32a91fb1c3b7ed7fd"},
+    {file = "pycrdt-0.14.9-cp315-cp315-win32.whl", hash = "sha256:97d8372ca70fed09e7be2c13ede5c0bcc679c840ef879f09cdaa9b0c0d9677c7"},
+    {file = "pycrdt-0.14.9-cp315-cp315-win_amd64.whl", hash = "sha256:096101cb0d65822f8d94e0ff953809df9b390df09dc92c26a3c0badd69b29c66"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:d0cce794752922cadbde01ddf2d2dbee1c2e17c18c22986d29f4c70c4e5a3840"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d0da593b7c661afaf20736aac8889c57d0a2ad1795dd47712763d91eca6f1eb9"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:13a1c269aaed9c438bab413acee3f54cf87ded4368187f6559991978b557c6d0"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl", hash = "sha256:fee06d3e88d7ff594aa8b694ac4bbd10deb31c9213c084d4fd1f56ac3e12cecc"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-manylinux_2_17_s390x.manylinux2014_s390x.whl", hash = "sha256:e618d7ca6aa0668cedefff6ee3f1ad8a02a6ec7a8e2378a280c7df25cbd58cee"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2f6146731ec4a8020fca1526cc6fe766e338c888fdc7e6fa243a7c2e3599f064"},
+    {file = "pycrdt-0.14.9-pp311-pypy311_pp73-manylinux_2_5_i686.manylinux1_i686.whl", hash = "sha256:81864b6b60c71fffa437f7bde879fdb84901c47745dc53ec93962c6ab1f7d616"},
+    {file = "pycrdt-0.14.9.tar.gz", hash = "sha256:cbf33a660b278c6c9d4d9851bd3407d9d54666efd452040ee6e8f2a1907bdb15"},
+]
+
+[package.dependencies]
+anyio = ">=4.4.0,<5.0.0"
+
+[[package]]
 name = "pydantic"
 version = "2.14.1"
 description = "Data validation using Python type hints"
@@ -2415,4 +2501,4 @@ test = ["pytest"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.16"
-content-hash = "468c1676657a181d055afb41c987c65cbb881df478d0754bacf0ef4c82d1cc4c"
+content-hash = "f75eb1f1d36b64648024fb31b243ab0157e37c2061720313b164495b1011568d"

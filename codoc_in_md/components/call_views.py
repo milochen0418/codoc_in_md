@@ -20,9 +20,10 @@ def call_button() -> rx.Component:
         ),
         rx.el.button(
             rx.icon("phone", class_name="h-4 w-4"),
-            "Call everyone",
+            rx.el.span("Call everyone", class_name="hidden xl:inline"),
             on_click=CallState.join_call,
             title="Call everyone on this document",
+            aria_label="Call everyone",
             class_name="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-gray-700 border border-gray-300 rounded-lg hover:bg-green-50 hover:text-green-700 hover:border-green-300 transition-colors whitespace-nowrap shrink-0",
         ),
     )
