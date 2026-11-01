@@ -3,6 +3,7 @@ name = "codoc-in-md"
 version = "0.1.0"
 description = ""
 authors = []
+license = "MIT"
 packages = [{include = "codoc_in_md"}]
 
 [tool.poetry.dependencies]

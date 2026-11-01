@@ -339,3 +339,7 @@ DDNS_INTENT_URL_LIVEKIT_ALT=http://127.0.0.1:3200 poetry run ./run_test_suite.sh
 - **Pygments**: Server-side syntax highlighting (used for HackMD-style code fences)
 - **pycrdt**: The server's copy of a document's Yjs text for a moment, when the AI changes it
 - **Python 3.11**
+
+## License
+
+[MIT](LICENSE)
