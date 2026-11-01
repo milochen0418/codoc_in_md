@@ -167,8 +167,22 @@ def _header_btn_cls() -> str:
     )
 
 
+def grid_embed_item() -> rx.Component:
+    """Choose a UserForm or cells of a ReflexGrid workbook to show in the document."""
+    if not _HAS_INTENT:
+        return rx.fragment()
+    return rx.el.button(
+        rx.icon("table", class_name="h-4 w-4"),
+        "Insert from Excel",
+        on_click=Intent.start(None, "grid.pick", on_result=EditorState.insert_embed, label="ReflexGrid"),
+        title="Show a form or cells of a ReflexGrid workbook in this document",
+        id="insert-from-excel",
+        class_name=_dropdown_item_cls(),
+    )
+
+
 def document_dropdown() -> rx.Component:
-    """Document dropdown: New / Duplicate."""
+    """Document dropdown: New / Duplicate / Insert from Excel."""
     return rx.el.div(
         rx.el.button(
             rx.icon("file-text", class_name="h-4 w-4"),
@@ -190,6 +204,7 @@ def document_dropdown() -> rx.Component:
                     on_click=EditorState.duplicate_document,
                     class_name=_dropdown_item_cls(),
                 ),
+                grid_embed_item(),
                 class_name=_dropdown_inner_cls(),
             ),
             class_name=_dropdown_menu_cls(),

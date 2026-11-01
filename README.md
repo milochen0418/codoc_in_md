@@ -26,6 +26,7 @@ and review Markdown docs in one place.
     - **Preview**: Focused reading
 - **Remote cursors (HackMD-style)**: Everyone's caret and selection show in the editor in their own color (while they are in the editor), with a
     name tag that appears while they type or move and when you hover their caret.
+- **ReflexGrid in a document**: A workbook's cells, read only and live, and its Excel UserForms, working, right in the preview.
 - **Presence indicators**: Shows who is on the document. Each avatar is ringed in the color of that person's cursor,
     and no two people on a document share a color.
 
@@ -142,6 +143,35 @@ Artifacts (screenshots/logs) are written to `testcases/<suite_name>/output/`.
 
 Which one is used follows `DDNS_COLLECTIONS_ROOT`, which re_ddns sets for apps that declare storage. A unit
 test covers the collection store: `poetry run pytest tests`.
+
+## ReflexGrid in a document
+
+[ReflexGrid](https://github.com/milochen0418/reflex_grid) workbooks can show in a document: a UserForm people use
+right there, and cells that follow the workbook live, so a row added on the form shows in the table at once.
+
+```
+{%grid a2094d9b90 form=OrderForm %}        the UserForm, working
+{%grid a2094d9b90 range=Orders %}          an Excel table: it grows with the table
+{%grid a2094d9b90 range=Sheet1!A1:D %}     down to wherever the data in columns A to D ends
+{%grid a2094d9b90 range=Sheet1!A1:D20 %}   these cells and no others
+```
+
+**Document › Insert from Excel** opens ReflexGrid's own dialog (the intent `grid.pick`): choose a workbook, then
+a form, a table or cells, and the line goes in at the caret. On the workbook, **Insert › Embed** gives the same
+lines to copy. Cells are read only in the document; a UserForm is the only way to change anything from there.
+
+Only an empty box goes in the document. `assets/embed_frames.js` keeps each frame in a layer of its own over its
+box, because React moves a box when a block is added above it, and an iframe that moves reloads: a form someone
+is filling in survives the others typing. Switching view mode replaces the preview, frames included, so what was
+typed on a form and not sent yet is lost then. Printing and **Export as PDF** show the box's label, not the frame.
+
+Settings, for local development (on re-ddns there is nothing to configure):
+
+- `DDNS_INTENT_URL_GRID`: where ReflexGrid's pages are (e.g. `http://127.0.0.1:3320`).
+- `GRID_BACKEND_URL`: where its backend is (e.g. `http://127.0.0.1:8320`), when that isn't the same address.
+- `DDNS_INTENT_PROVIDER_GRID_PICK=grid`: the app that provides `grid.pick`, when there is no registry.
+
+E2E suite (a stand-in for ReflexGrid runs inside it): `DDNS_INTENT_URL_GRID=http://127.0.0.1:8398 poetry run ./run_test_suite.sh grid_embed`
 
 ## Calls
 

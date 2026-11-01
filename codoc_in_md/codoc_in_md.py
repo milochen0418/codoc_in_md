@@ -280,6 +280,7 @@ app = rx.App(
         rx.el.script(src="/fullscreen.js", defer=True),
         rx.el.script(src="/export_pdf.js", defer=True),
         rx.el.script(src="/yjs_collab.js", defer=True),
+        rx.el.script(src="/embed_frames.js", defer=True),
         # HackMD commonly uses Font Awesome 4 markup like: <i class="fa fa-...">.
         # Load FA so those icons render in the preview.
         rx.el.link(

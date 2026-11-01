@@ -2785,6 +2785,59 @@ class GenericIFrameEmbed:
         )
 
 
+_GRID_ARGS_RE = re.compile(
+    r"(?P<book>[A-Za-z0-9][A-Za-z0-9-]{0,63})\s+(?P<kind>form|range)=(?P<value>\S.*)",
+    re.DOTALL,
+)
+
+
+def _grid_urls() -> tuple[str, str] | None:
+    """ReflexGrid's address, for its pages and for its backend's own routes.
+
+    Behind re_ddns's nginx they are one address. On localhost its pages are on the frontend port
+    (`DDNS_INTENT_URL_GRID`) and its routes on the backend port (`GRID_BACKEND_URL`).
+    """
+    try:
+        from reflex_ddns_auth.intent.protocol import app_url
+    except ImportError:
+        return None
+    pages = app_url("grid")
+    return pages, (os.environ.get("GRID_BACKEND_URL") or pages).rstrip("/")
+
+
+class GridEmbed:
+    """A ReflexGrid workbook in the document: a UserForm people use right here, or cells, read only,
+    that follow the workbook live.
+
+        {%grid a2094d9b90 form=OrderForm %}
+        {%grid a2094d9b90 range=Orders %}          a table: it grows with the table
+        {%grid a2094d9b90 range=Sheet1!A1:D %}     down to wherever the data in A to D ends
+        {%grid a2094d9b90 range=Sheet1!A1:D20 %}   these cells
+
+    Only an empty box goes in the document: assets/embed_frames.js keeps the frame over it, where
+    edits to the document can't reload it.
+    """
+
+    name = "grid"
+
+    def render(self, directive: EmbedDirective) -> str | None:
+        m = _GRID_ARGS_RE.fullmatch((directive.args or "").strip())
+        urls = _grid_urls()
+        if m is None or urls is None:
+            return None
+        book, kind, value = m["book"], m["kind"], m["value"].strip()
+        if kind == "form":
+            src = f"{urls[0]}/intent/grid-form?{urlencode({'book': book, 'form': value})}"
+        else:
+            src = f"{urls[1]}/_reflex_grid/embed/table?{urlencode({'book': book, 'range': value})}"
+        return (
+            f"\n<div class=\"my-4 w-full\" data-embed-src=\"{_escape_attr(src)}\" "
+            f"data-embed-kind=\"{'form' if kind == 'form' else 'table'}\" "
+            "style=\"min-height:96px;font-size:12px;color:#9ca3af;\">"
+            f"ReflexGrid: {html.escape(value)}</div>\n"
+        )
+
+
 class GistEmbed:
     name = "gist"
 
@@ -3412,6 +3465,7 @@ EMBED_EXTENSIONS: dict[str, EmbedExtension] = {
     "slideshare": SlideShareEmbed(),
     "speakerdeck": SpeakerDeckEmbed(),
     "pdf": PdfEmbed(),
+    "grid": GridEmbed(),
 }
 
 

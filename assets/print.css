@@ -59,6 +59,11 @@
     max-width: none !important;
     padding: 0 !important;
   }
+
+  /* Frames sit over the screen's layout, not the printed one (embed_frames.js). */
+  #embed-layer {
+    display: none !important;
+  }
 }
 
 html.codoc-printing,

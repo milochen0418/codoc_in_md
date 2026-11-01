@@ -2,6 +2,7 @@ import re as _re
 import reflex as rx
 import sqlmodel
 import asyncio
+import json
 import atexit
 import os
 import sys
@@ -1044,6 +1045,15 @@ class EditorState(rx.State):
         self.doc_content = new_content
         self.doc_content_rendered = _render_markdown_source(new_content)
         self._save_doc_to_db(self.doc_id, new_content)
+
+    @rx.event
+    def insert_embed(self, data: dict):
+        """The line ReflexGrid's `grid.pick` dialog answers with goes in the document, through
+        the editor (assets/embed_frames.js), so everyone on it gets the line."""
+        code = " ".join(str((data or {}).get("code") or "").split())
+        if not code.startswith("{%grid "):
+            return None
+        return rx.call_script(f"window.codocInsertBlock && window.codocInsertBlock({json.dumps(code)})")
 
     @rx.event
     def export_markdown(self):
