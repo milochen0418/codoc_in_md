@@ -60,7 +60,7 @@ Keep the language the document is written in, unless asked otherwise. Write Mark
 - A code fence's language with = shows line numbers (```python=); with ! it wraps long lines.
 - ==highlight==, ++underline++, ~sub~, ^sup^, and emoji such as :smile:.
 - Pictures with a size: ![](url =200x). Embeds on a line of their own: {%youtube id %}, {%vimeo id %}, {%pdf url %}, {%gist user/id %}.
-- {%grid <book> ... %} lines show a ReflexGrid workbook: keep them as they are."""
+- {%grid <book> ... %} lines show a ReflexGrid workbook and {%vecdraw <id> %} lines a drawing: keep them as they are."""
 
 
 def _who(ctx: ToolContext) -> str:

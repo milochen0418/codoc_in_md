@@ -59,7 +59,7 @@ Your whole answer goes straight into the document, so answer with the new text a
 Rules:
 - Stay in the language of the text. Traditional Chinese stays Traditional Chinese, never Simplified. Translate only when the instruction says so.
 - Keep what the text means. Invent no facts, names or numbers.
-- Keep its Markdown as it is: headings, lists, links, pictures, code, math, and lines like {%grid ... %}.
+- Keep its Markdown as it is: headings, lists, links, pictures, code, math, and lines like {%grid ... %} or {%vecdraw ... %}.
 - The text around the part is only there so that you understand it: never repeat it."""
 
 CARET = "[[HERE]]"

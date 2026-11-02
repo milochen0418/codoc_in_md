@@ -64,6 +64,12 @@
   #embed-layer {
     display: none !important;
   }
+
+  /* A drawing's picture is in its box for this (embeds.VecdrawEmbed). */
+  [data-embed-kind="drawing"] img {
+    display: block !important;
+    width: 100%;
+  }
 }
 
 html.codoc-printing,

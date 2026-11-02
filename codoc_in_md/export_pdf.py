@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from urllib.parse import quote
 from pathlib import Path
@@ -7,6 +8,7 @@ from pathlib import Path
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse, Response
 
+from .embeds import vecdraw_url
 from .state import DOCUMENTS_STORE, render_markdown_for_export
 
 
@@ -60,6 +62,11 @@ blockquote {
   padding-left: 12pt;
   border-left: 4px solid #d1d5db;
   color: #374151;
+}
+
+[data-embed-kind="drawing"] img {
+  display: block !important;
+  width: 100%;
 }
 
 table {
@@ -119,6 +126,17 @@ img {
   display: none !important;
 }
 """
+
+
+def _fetch(url: str, *args, **kwargs):
+    """What a document shows, for the PDF. On re_ddns a drawing's picture comes straight from its
+    app: an app's https address has a certificate only re_ddns's own CA vouches for."""
+    from weasyprint import default_url_fetcher
+
+    own = vecdraw_url()
+    if own and url.startswith(own + "/") and os.environ.get("SERVICE_SUBDOMAIN"):
+        url = "http://smart-app-vecdraw:8000" + url[len(own):]
+    return default_url_fetcher(url, *args, **kwargs)
 
 
 def register_pdf_export_routes(app) -> None:
@@ -201,7 +219,7 @@ def register_pdf_export_routes(app) -> None:
             return PlainTextResponse("Missing WeasyPrint dependency", status_code=500)
 
         base_path = str(Path(__file__).resolve().parents[1])
-        pdf_bytes = HTML(string=html, base_url=base_path).write_pdf(
+        pdf_bytes = HTML(string=html, base_url=base_path, url_fetcher=_fetch).write_pdf(
             stylesheets=[CSS(string=_PDF_CSS)]
         )
 

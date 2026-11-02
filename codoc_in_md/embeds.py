@@ -2838,6 +2838,45 @@ class GridEmbed:
         )
 
 
+_VECDRAW_ARGS_RE = re.compile(r"(?:https?://[^/\s]+/doc/)?(?P<doc>[A-Za-z0-9-]{1,64})/?")
+
+
+def vecdraw_url() -> str | None:
+    """Where Codoc in VecDraw's backend is. Behind re_ddns's nginx that is its address; on localhost
+    it says so (`VECDRAW_BACKEND_URL`)."""
+    try:
+        from reflex_ddns_auth.intent.protocol import app_url
+    except ImportError:
+        return None
+    return (os.environ.get("VECDRAW_BACKEND_URL") or app_url("vecdraw")).rstrip("/")
+
+
+class VecdrawEmbed:
+    """A drawing from Codoc in VecDraw in the document: read only, and it follows the drawing live.
+
+        {%vecdraw bd12948b %}
+        {%vecdraw https://vecdraw.reflex-ddns.com/doc/bd12948b %}
+
+    The box stays empty on screen, as for GridEmbed: assets/embed_frames.js keeps the frame over it.
+    The picture in it is for printing and PDF, which have no frames.
+    """
+
+    name = "vecdraw"
+
+    def render(self, directive: EmbedDirective) -> str | None:
+        m = _VECDRAW_ARGS_RE.fullmatch((directive.args or "").strip())
+        url = vecdraw_url()
+        if m is None or url is None:
+            return None
+        doc = m["doc"]
+        return (
+            f"\n<div class=\"my-4 w-full\" data-embed-src=\"{_escape_attr(f'{url}/_vecdraw/embed/{doc}')}\" "
+            "data-embed-kind=\"drawing\" style=\"min-height:96px;\">"
+            f"<img src=\"{_escape_attr(f'{url}/_vecdraw/og/{doc}/image.png')}\" alt=\"Drawing {html.escape(doc)}\" "
+            "style=\"display:none;\"/></div>\n"
+        )
+
+
 class GistEmbed:
     name = "gist"
 
@@ -3466,6 +3505,7 @@ EMBED_EXTENSIONS: dict[str, EmbedExtension] = {
     "speakerdeck": SpeakerDeckEmbed(),
     "pdf": PdfEmbed(),
     "grid": GridEmbed(),
+    "vecdraw": VecdrawEmbed(),
 }
 
 

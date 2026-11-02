@@ -57,6 +57,7 @@ One line of text, and it's there for everyone:
 | Picture | `![](https://example.com/a.png =200x200)` | From a link; the size is optional. |
 | ReflexGrid form | `{%grid a2094d9b90 form=OrderForm %}` | A real Excel UserForm: see [below](#reflexgrid-in-a-document). |
 | ReflexGrid cells | `{%grid a2094d9b90 range=Orders %}` | Read only, and they follow the workbook. |
+| Drawing | `{%vecdraw bd12948b %}` | From Codoc in VecDraw, by its id or its link: see [below](#a-drawing-in-a-document). |
 
 ![A tutorial video plays in the preview while Ben's caret writes notes in the editor](docs/images/video-and-notes.jpg)
 
@@ -179,6 +180,29 @@ Settings, for local development (on re-ddns there is nothing to configure):
 
 E2E suite (a stand-in for ReflexGrid runs inside it): `DDNS_INTENT_URL_GRID=http://127.0.0.1:8398 poetry run ./run_test_suite.sh grid_embed`
 
+## A drawing in a document
+
+A drawing from [Codoc in VecDraw](https://github.com/milochen0418/codoc_in_vecdraw) can show in a document. Give its
+id or its link:
+
+```
+{%vecdraw bd12948b %}
+{%vecdraw https://vecdraw.reflex-ddns.com/doc/bd12948b %}
+```
+
+![A document with the line on the left and the drawing in the preview on the right](docs/images/vecdraw.jpg)
+
+The picture follows the drawing: when someone draws on it, the document shows the change a moment later, with no
+reload. It is read only and has no way to the drawing's editor, as for ReflexGrid's cells: to change the picture,
+open the drawing. The frame stays over its box in the same layer as ReflexGrid's, so edits above it don't reload it.
+Printing and **Export as PDF** show a picture of the drawing as it is then.
+
+Settings, for local development (on re-ddns there is nothing to configure):
+
+- `VECDRAW_BACKEND_URL`: where the app's backend is (e.g. `http://127.0.0.1:8310`).
+
+E2E suite (a stand-in for the app runs inside it): `VECDRAW_BACKEND_URL=http://127.0.0.1:8399 poetry run ./run_test_suite.sh vecdraw_embed`
+
 ## Where documents are saved
 
 - **Run on its own** (e.g. `poetry run ./reflex_rerun.sh`): in the app's SQLite database (`db_url` in
@@ -205,7 +229,7 @@ test covers the collection store: `poetry run pytest tests`.
 - **Slides, books, tags, templates, GitHub sync, dark mode, offline editing.**
 - **Phones.** There's a phone menu, but nobody has tested writing on a phone. On re_ddns each device also needs the
   host's DNS setting and certificate, so colleagues have to be able to reach your machine.
-- **PDF export** keeps text, tables and code. Math stays as its source; diagrams and embeds don't come along.
+- **PDF export** keeps text, tables, code and drawings. Math stays as its source; diagrams and the other embeds don't come along.
 - **Public services.** The diagram blocks load their drawing libraries from public CDNs, and PlantUML text goes to
   plantuml.com by default.
 - **Small things.** A line of only `---` shows as a dash: use `***` or `___` for a rule. `[TOC]` is empty in Preview Only.

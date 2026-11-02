@@ -1,5 +1,6 @@
 (function () {
-  // Frames embedded in the preview: ReflexGrid's forms and tables (embeds.GridEmbed).
+  // Frames embedded in the preview: ReflexGrid's forms and tables (embeds.GridEmbed) and Codoc in
+  // VecDraw's drawings (embeds.VecdrawEmbed).
   //
   // The document only holds an empty box for each one. The frames live in a layer of their own in
   // the preview's scroll area, placed over their boxes: the preview is drawn anew on every edit, and
@@ -10,15 +11,15 @@
   if (window[INIT_KEY]) return;
   window[INIT_KEY] = true;
 
-  const MESSAGE = 'reflex-grid-embed';
+  const MESSAGES = ['reflex-grid-embed', 'vecdraw-embed'];
   // A box stays this long before its frame loads: someone may still be typing the line.
   const SETTLE_MS = 500;
   // A frame stays this long (hidden) after its box went: it may be back on the next render.
   const GONE_MS = 2000;
-  // A table taller than this share of the window scrolls inside its frame.
+  // A table taller than this share of the window scrolls inside its frame; a drawing gets smaller.
   const TABLE_MAX = 0.7;
 
-  const frames = new Map(); // "<src> <nth of that src>" -> {src, kind, box, el, origin, height, since, gone}
+  const frames = new Map(); // "<src> <nth of that src>" -> {src, kind, box, el, origin, height, ratio, since, gone}
   let pane = null;
   let layer = null;
   let sizes = null;
@@ -34,7 +35,7 @@
   function makeFrame(f) {
     const el = document.createElement('iframe');
     el.src = f.src;
-    el.title = 'ReflexGrid';
+    el.title = f.kind === 'drawing' ? 'Codoc in VecDraw' : 'ReflexGrid';
     el.setAttribute('frameborder', '0');
     el.setAttribute('allow', 'clipboard-write');
     el.style.cssText = 'position:absolute;border:0;background:#fff;display:block;';
@@ -43,9 +44,10 @@
   }
 
   function fit(f, base) {
-    if (f.height) {
-      const room = f.kind === 'table' ? Math.max(200, window.innerHeight * TABLE_MAX) : Infinity;
-      const height = Math.min(f.height, room) + 'px';
+    const wanted = f.ratio ? f.box.getBoundingClientRect().width * f.ratio : f.height;
+    if (wanted) {
+      const room = f.kind === 'form' ? Infinity : Math.max(200, window.innerHeight * TABLE_MAX);
+      const height = Math.min(wanted, room) + 'px';
       if (f.box.style.height !== height) {
         f.box.style.minHeight = '0';
         f.box.style.height = height;
@@ -75,7 +77,7 @@
       seen.add(key);
       let f = frames.get(key);
       if (!f) {
-        f = { src, kind: box.dataset.embedKind, el: null, height: 0, since: now, gone: 0 };
+        f = { src, kind: box.dataset.embedKind, el: null, height: 0, ratio: 0, since: now, gone: 0 };
         f.origin = new URL(src, location.href).origin;
         frames.set(key, f);
         setTimeout(schedule, SETTLE_MS);
@@ -125,13 +127,15 @@
   attach();
   window.addEventListener('resize', schedule);
 
-  // A frame says how tall it wants to be; only the frame itself can say that.
+  // A frame says how tall it wants to be, in pixels or as a share of its width; only the frame
+  // itself can say that.
   window.addEventListener('message', (ev) => {
     const m = ev.data;
-    if (!m || m.type !== MESSAGE) return;
+    if (!m || !MESSAGES.includes(m.type)) return;
     frames.forEach((f) => {
       if (f.el && f.el.contentWindow === ev.source && f.origin === ev.origin) {
         f.height = Math.max(0, Number(m.height) || 0);
+        f.ratio = Math.max(0, Number(m.ratio) || 0);
         schedule();
       }
     });
